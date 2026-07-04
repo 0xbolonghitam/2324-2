@@ -125,7 +125,6 @@ function LoadConfigFromFile()
         if success and type(result) == "table" then
             ConfigData = result
             ConfigData._version = CURRENT_VERSION
-            -- PERBAIKAN: Tidak set active config agar autosave tidak menimpa file autoload
         end
     end
 end
@@ -134,48 +133,245 @@ function LoadConfigElements()
     ApplyingConfig = true
     for key, element in pairs(Elements) do
         if ConfigData[key] ~= nil and element.Set then
-            element:Set(ConfigData[key], true)
+            local ok, err = pcall(function()
+                element:Set(ConfigData[key], true)
+            end)
+            if not ok then
+                warn("[BolongUi] Gagal menerapkan config untuk elemen '" .. tostring(key) .. "': " .. tostring(err))
+            end
         end
     end
     ApplyingConfig = false
 end
 
-local Icons = {
-    player    = "rbxassetid://12120698352",
-    web       = "rbxassetid://137601480983962",
-    bag       = "rbxassetid://8601111810",
-    shop      = "rbxassetid://4985385964",
-    cart      = "rbxassetid://128874923961846",
-    plug      = "rbxassetid://137601480983962",
-    settings  = "rbxassetid://70386228443175",
-    loop      = "rbxassetid://122032243989747",
-    gps       = "rbxassetid://17824309485",
-    compas    = "rbxassetid://125300760963399",
-    gamepad   = "rbxassetid://84173963561612",
-    boss      = "rbxassetid://13132186360",
-    scroll    = "rbxassetid://114127804740858",
-    menu      = "rbxassetid://6340513838",
-    crosshair = "rbxassetid://12614416478",
-    user      = "rbxassetid://108483430622128",
-    stat      = "rbxassetid://12094445329",
-    eyes      = "rbxassetid://14321059114",
-    sword     = "rbxassetid://82472368671405",
-    discord   = "rbxassetid://94434236999817",
-    star      = "rbxassetid://107005941750079",
-    skeleton  = "rbxassetid://17313330026",
-    payment   = "rbxassetid://18747025078",
-    scan      = "rbxassetid://109869955247116",
-    alert     = "rbxassetid://73186275216515",
-    question  = "rbxassetid://17510196486",
-    idea      = "rbxassetid://16833255748",
-    strom     = "rbxassetid://13321880293",
-    water     = "rbxassetid://100076212630732",
-    dcs       = "rbxassetid://15310731934",
-    start     = "rbxassetid://108886429866687",
-    next      = "rbxassetid://12662718374",
-    rod       = "rbxassetid://103247953194129",
-    fish      = "rbxassetid://97167558235554",
-}
+local lucide_source_url = "https://github.com/latte-soft/lucide-roblox/releases/latest/download/lucide-roblox.luau"
+
+local Lucide
+do
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet(lucide_source_url))()
+    end)
+    if ok and result then
+        Lucide = result
+    else
+        warn("[BolongUi] Gagal memuat library resmi Lucide Icons dari " .. lucide_source_url .. " -- " .. tostring(result))
+        Lucide = nil
+    end
+end
+
+local LucideAssetCache = {}
+
+local function GetLucideAsset(iconName, size)
+    if not Lucide then return nil end
+
+    local cacheKey = iconName .. ":" .. tostring(size or 256)
+    local cached = LucideAssetCache[cacheKey]
+    if cached ~= nil then
+        if cached == false then return nil end
+        return cached
+    end
+
+    local ok, asset = pcall(function()
+        return Lucide.GetAsset(iconName, size)
+    end)
+
+    if ok and asset then
+        LucideAssetCache[cacheKey] = asset
+        return asset
+    end
+
+    LucideAssetCache[cacheKey] = false
+    return nil
+end
+
+local function ApplyIcon(imageLabel, name, size)
+    if not imageLabel then return end
+
+    if name == nil or name == "" then
+        imageLabel.Image = ""
+        imageLabel.ImageRectOffset = Vector2.new(0, 0)
+        imageLabel.ImageRectSize = Vector2.new(0, 0)
+        return
+    end
+
+    if type(name) ~= "string" then
+        imageLabel.Image = tostring(name)
+        imageLabel.ImageRectOffset = Vector2.new(0, 0)
+        imageLabel.ImageRectSize = Vector2.new(0, 0)
+        return
+    end
+
+    if name:match("^rbxassetid://") or name:match("^rbxthumb://") or name:match("^https?://") or name:match("^%d+$") then
+        local finalImage = name
+        if name:match("^%d+$") then
+            finalImage = "rbxassetid://" .. name
+        end
+        imageLabel.Image = finalImage
+        imageLabel.ImageRectOffset = Vector2.new(0, 0)
+        imageLabel.ImageRectSize = Vector2.new(0, 0)
+        return
+    end
+
+    local asset = GetLucideAsset(name, size)
+    if asset then
+        imageLabel.Image = asset.Url
+        imageLabel.ImageRectOffset = asset.ImageRectOffset
+        imageLabel.ImageRectSize = asset.ImageRectSize
+    else
+        warn("[BolongUi] Ikon Lucide tidak ditemukan atau library gagal dimuat: \"" .. name .. "\"")
+        imageLabel.Image = ""
+        imageLabel.ImageRectOffset = Vector2.new(0, 0)
+        imageLabel.ImageRectSize = Vector2.new(0, 0)
+    end
+end
+
+local discord_logo_asset_id = "rbxassetid://95644421757953"
+
+local WebImageCacheFolder = "BolongHub/ImageCache"
+if not isfolder(WebImageCacheFolder) then
+    makefolder(WebImageCacheFolder)
+end
+
+local MAX_CACHE_FILES = 5
+local ManifestPath = WebImageCacheFolder .. "/_manifest.json"
+local WebImageAssetCache = {}
+local PendingImageEvents = {}
+local CacheManifest = {}
+local ManifestSaveQueued = false
+
+local function LoadImageCacheManifest()
+    if not (isfile and readfile and isfile(ManifestPath)) then return end
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(readfile(ManifestPath))
+    end)
+    if ok and type(decoded) == "table" then
+        CacheManifest = decoded
+    end
+end
+LoadImageCacheManifest()
+
+local function SaveImageCacheManifest()
+    if ManifestSaveQueued or not writefile then return end
+    ManifestSaveQueued = true
+    task.delay(0.5, function()
+        ManifestSaveQueued = false
+        local ok, encoded = pcall(function()
+            return HttpService:JSONEncode(CacheManifest)
+        end)
+        if ok then
+            pcall(writefile, ManifestPath, encoded)
+        end
+    end)
+end
+
+local function HashUrl(str)
+    local hash = 5381
+    for i = 1, #str do
+        hash = (hash * 33 + string.byte(str, i)) % 4294967296
+    end
+    return string.format("%08x", hash)
+end
+
+local function TrimImageCache()
+    if not delfile then return end
+
+    local count = 0
+    for _ in pairs(CacheManifest) do count = count + 1 end
+    if count <= MAX_CACHE_FILES then return end
+
+    local entries = {}
+    for hash, info in pairs(CacheManifest) do
+        entries[#entries + 1] = { hash = hash, info = info }
+    end
+    table.sort(entries, function(a, b)
+        return (a.info.lastUsed or 0) < (b.info.lastUsed or 0)
+    end)
+
+    local toRemove = count - MAX_CACHE_FILES
+    for i = 1, toRemove do
+        local entry = entries[i]
+        if entry and entry.info and entry.info.file then
+            local path = WebImageCacheFolder .. "/" .. entry.info.file
+            if isfile and isfile(path) then
+                pcall(delfile, path)
+            end
+            CacheManifest[entry.hash] = nil
+            if entry.info.url then
+                WebImageAssetCache[entry.info.url] = nil
+            end
+        end
+    end
+
+    SaveImageCacheManifest()
+end
+
+local function GetWebImageAsset(url)
+    if not url or url == "" then return "" end
+    if WebImageAssetCache[url] ~= nil then return WebImageAssetCache[url] end
+
+    local existingEvent = PendingImageEvents[url]
+    if existingEvent then
+        return existingEvent.Event:Wait()
+    end
+
+    local getAsset = getcustomasset or getsynasset
+    if not (writefile and getAsset and game.HttpGet) then
+        warn("[BolongUi] Executor tidak mendukung getcustomasset/getsynasset, gambar dari url web mungkin tidak tampil.")
+        return ""
+    end
+
+    local event = Instance.new("BindableEvent")
+    PendingImageEvents[url] = event
+
+    local ext = ".png"
+    if url:match("%.jpe?g") then
+        ext = ".jpg"
+    elseif url:match("%.gif") then
+        ext = ".gif"
+    elseif url:match("%.webp") then
+        ext = ".webp"
+    end
+
+    local hash = HashUrl(url)
+    local filename = hash .. ext
+    local path = WebImageCacheFolder .. "/" .. filename
+
+    local result = ""
+
+    if isfile and isfile(path) then
+        local ok, assetId = pcall(getAsset, path)
+        if ok and assetId and assetId ~= "" then
+            result = assetId
+        end
+    end
+
+    if result == "" then
+        local ok, res = pcall(function()
+            local data = game:HttpGet(url)
+            if not data or data == "" then return nil end
+            writefile(path, data)
+            return getAsset(path)
+        end)
+        if ok and res and res ~= "" then
+            result = res
+        else
+            warn("[BolongUi] Gagal memuat gambar dari url: " .. tostring(url) .. " -- " .. tostring(res))
+        end
+    end
+
+    if result ~= "" then
+        CacheManifest[hash] = { url = url, file = filename, lastUsed = os.time() }
+        SaveImageCacheManifest()
+        TrimImageCache()
+    end
+
+    WebImageAssetCache[url] = result
+    PendingImageEvents[url] = nil
+    event:Fire(result)
+    event:Destroy()
+
+    return result
+end
 
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
@@ -253,10 +449,10 @@ local function MakeDraggable(topbarobject, object)
 
         if isMobile then
             minSizeX, minSizeY = 100, 100
-            defSizeX, defSizeY = 470, 270
+            defSizeX, defSizeY = 490, 315
         else
             minSizeX, minSizeY = 100, 100
-            defSizeX, defSizeY = 640, 400
+            defSizeX, defSizeY = 980, 630
         end
 
         object.Size = UDim2.new(0, defSizeX, 0, defSizeY)
@@ -369,7 +565,7 @@ function Chloex:MakeNotify(NotifyConfig)
             NotifyLayout.AnchorPoint = Vector2.new(1, 1)
             NotifyLayout.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             NotifyLayout.BackgroundTransparency = 0.9990000128746033
-            NotifyLayout.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            NotifyLayout.BorderColor3 = Color3.fromRGB(15, 15, 15)
             NotifyLayout.BorderSizePixel = 0
             NotifyLayout.Position = UDim2.new(1, -30, 1, -30)
             NotifyLayout.Size = UDim2.new(0, 320, 1, 0)
@@ -405,8 +601,8 @@ function Chloex:MakeNotify(NotifyConfig)
         local ImageLabel = Instance.new("ImageLabel");
         local TextLabel2 = Instance.new("TextLabel");
 
-        NotifyFrame.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
-        NotifyFrame.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        NotifyFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        NotifyFrame.BorderColor3 = Color3.fromRGB(15, 15, 15)
         NotifyFrame.BorderSizePixel = 0
         NotifyFrame.Size = UDim2.new(1, 0, 0, 150)
         NotifyFrame.Name = "NotifyFrame"
@@ -415,8 +611,8 @@ function Chloex:MakeNotify(NotifyConfig)
         NotifyFrame.AnchorPoint = Vector2.new(0, 1)
         NotifyFrame.Position = UDim2.new(0, 0, 1, -(NotifyPosHeigh))
 
-        NotifyFrameReal.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
-        NotifyFrameReal.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        NotifyFrameReal.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        NotifyFrameReal.BorderColor3 = Color3.fromRGB(15, 15, 15)
         NotifyFrameReal.BorderSizePixel = 0
         NotifyFrameReal.Position = UDim2.new(0, 400, 0, 0)
         NotifyFrameReal.Size = UDim2.new(1, 0, 1, 0)
@@ -433,9 +629,9 @@ function Chloex:MakeNotify(NotifyConfig)
         DropShadowHolder.Name = "DropShadowHolder"
         DropShadowHolder.Parent = NotifyFrameReal
 
-        Top.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+        Top.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
         Top.BackgroundTransparency = 0.9990000128746033
-        Top.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        Top.BorderColor3 = Color3.fromRGB(15, 15, 15)
         Top.BorderSizePixel = 0
         Top.Size = UDim2.new(1, 0, 0, 36)
         Top.Name = "Top"
@@ -448,7 +644,7 @@ function Chloex:MakeNotify(NotifyConfig)
         TextLabel.TextXAlignment = Enum.TextXAlignment.Left
         TextLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         TextLabel.BackgroundTransparency = 0.9990000128746033
-        TextLabel.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        TextLabel.BorderColor3 = Color3.fromRGB(15, 15, 15)
         TextLabel.BorderSizePixel = 0
         TextLabel.Size = UDim2.new(1, 0, 1, 0)
         TextLabel.Parent = Top
@@ -464,7 +660,7 @@ function Chloex:MakeNotify(NotifyConfig)
         TextLabel1.TextXAlignment = Enum.TextXAlignment.Left
         TextLabel1.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         TextLabel1.BackgroundTransparency = 0.9990000128746033
-        TextLabel1.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        TextLabel1.BorderColor3 = Color3.fromRGB(15, 15, 15)
         TextLabel1.BorderSizePixel = 0
         TextLabel1.Size = UDim2.new(1, 0, 1, 0)
         TextLabel1.Position = UDim2.new(0, TextLabel.TextBounds.X + 15, 0, 0)
@@ -472,12 +668,12 @@ function Chloex:MakeNotify(NotifyConfig)
 
         Close.Font = Enum.Font.SourceSans
         Close.Text = ""
-        Close.TextColor3 = Color3.fromRGB(17, 17, 23)
+        Close.TextColor3 = Color3.fromRGB(15, 15, 15)
         Close.TextSize = 14
         Close.AnchorPoint = Vector2.new(1, 0.5)
         Close.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         Close.BackgroundTransparency = 0.9990000128746033
-        Close.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        Close.BorderColor3 = Color3.fromRGB(15, 15, 15)
         Close.BorderSizePixel = 0
         Close.Position = UDim2.new(1, -5, 0.5, 0)
         Close.Size = UDim2.new(0, 25, 0, 25)
@@ -488,7 +684,7 @@ function Chloex:MakeNotify(NotifyConfig)
         ImageLabel.AnchorPoint = Vector2.new(0.5, 0.5)
         ImageLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         ImageLabel.BackgroundTransparency = 0.9990000128746033
-        ImageLabel.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        ImageLabel.BorderColor3 = Color3.fromRGB(15, 15, 15)
         ImageLabel.BorderSizePixel = 0
         ImageLabel.Position = UDim2.new(0.49000001, 0, 0.5, 0)
         ImageLabel.Size = UDim2.new(1, -8, 1, -8)
@@ -503,7 +699,7 @@ function Chloex:MakeNotify(NotifyConfig)
         TextLabel2.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         TextLabel2.BackgroundTransparency = 0.9990000128746033
         TextLabel2.TextColor3 = Color3.fromRGB(150.0000062584877, 150.0000062584877, 150.0000062584877)
-        TextLabel2.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        TextLabel2.BorderColor3 = Color3.fromRGB(15, 15, 15)
         TextLabel2.BorderSizePixel = 0
         TextLabel2.Position = UDim2.new(0, 10, 0, 27)
         TextLabel2.Parent = NotifyFrameReal
@@ -561,7 +757,8 @@ function Chloex:Window(GuiConfig)
     GuiConfig.Title        = GuiConfig.Title or "BolongHub"
     GuiConfig.Image        = GuiConfig.Image or "84034353458936"
     GuiConfig.Footer       = GuiConfig.Footer or ""
-    GuiConfig.Color        = GuiConfig.Color or Color3.fromRGB(235, 235, 235)
+    GuiConfig.Author       = GuiConfig.Author or ""
+    GuiConfig.Color        = GuiConfig.Color or Color3.fromRGB(240, 240, 240)
     GuiConfig["Tab Width"] = GuiConfig["Tab Width"] or 120
     GuiConfig.Version      = GuiConfig.Version or 1
     if GuiConfig.Search == nil then GuiConfig.Search = true end
@@ -727,7 +924,6 @@ function Chloex:Window(GuiConfig)
         end
 
         writefile(path, encoded)
-        -- PERBAIKAN: Set autosave ke false
         SetActiveConfig(name, path, false, "saved")
         than("Saved '" .. name .. "'", 4, GuiConfig.Color, "BolongHub", "Config")
         return true
@@ -752,7 +948,6 @@ function Chloex:Window(GuiConfig)
         end
 
         ApplyConfigData(data)
-        -- PERBAIKAN: Set autosave ke false
         SetActiveConfig(name, path, false, "manual")
         than("Loaded '" .. name .. "'", 4, GuiConfig.Color, "BolongHub", "Config")
         return true
@@ -779,7 +974,6 @@ function Chloex:Window(GuiConfig)
         EnsureConfigFolder()
         name = name or ""
         writefile(GameConfigFolder .. "/_autoload.json", HttpService:JSONEncode({ Name = name }))
-        -- PERBAIKAN: Hapus SetActiveConfig
     end
 
     function GuiFunc:GetAutoLoad()
@@ -791,7 +985,7 @@ function Chloex:Window(GuiConfig)
         return ""
     end
 
-    local NatUI = Instance.new("ScreenGui");
+    local BHub = Instance.new("ScreenGui");
     local DropShadowHolder = Instance.new("Frame");
     local DropShadow = Instance.new("ImageLabel");
     local Main = Instance.new("Frame");
@@ -814,10 +1008,10 @@ function Chloex:Window(GuiConfig)
     local LayersFolder = Instance.new("Folder");
     local LayersPageLayout = Instance.new("UIPageLayout");
 
-    NatUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    NatUI.Name = "NatUI"
-    NatUI.ResetOnSpawn = false
-    NatUI.Parent = game:GetService("CoreGui")
+    BHub.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    BHub.Name = "BHub"
+    BHub.ResetOnSpawn = false
+    BHub.Parent = game:GetService("CoreGui")
 
     DropShadowHolder.BackgroundTransparency = 1
     DropShadowHolder.BorderSizePixel = 0
@@ -830,12 +1024,12 @@ function Chloex:Window(GuiConfig)
     end
     DropShadowHolder.ZIndex = 0
     DropShadowHolder.Name = "DropShadowHolder"
-    DropShadowHolder.Parent = NatUI
+    DropShadowHolder.Parent = BHub
 
-    DropShadowHolder.Position = UDim2.new(0, (NatUI.AbsoluteSize.X // 2 - DropShadowHolder.Size.X.Offset // 2), 0,
-        (NatUI.AbsoluteSize.Y // 2 - DropShadowHolder.Size.Y.Offset // 2))
+    DropShadowHolder.Position = UDim2.new(0, (BHub.AbsoluteSize.X // 2 - DropShadowHolder.Size.X.Offset // 2), 0,
+        (BHub.AbsoluteSize.Y // 2 - DropShadowHolder.Size.Y.Offset // 2))
     DropShadow.Image = "rbxassetid://6015897843"
-    DropShadow.ImageColor3 = Color3.fromRGB(22, 22, 30)
+    DropShadow.ImageColor3 = Color3.fromRGB(10, 10, 10)
     DropShadow.ImageTransparency = 1
     DropShadow.ScaleType = Enum.ScaleType.Slice
     DropShadow.SliceCenter = Rect.new(49, 49, 450, 450)
@@ -856,12 +1050,12 @@ function Chloex:Window(GuiConfig)
         Main.BackgroundTransparency = 1
         Main.ImageTransparency = GuiConfig.ThemeTransparency or 0.15
     else
-        Main.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+        Main.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
         Main.BackgroundTransparency = 0.12
     end
 
     Main.AnchorPoint = Vector2.new(0.5, 0.5)
-    Main.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    Main.BorderColor3 = Color3.fromRGB(15, 15, 15)
     Main.BorderSizePixel = 0
     Main.Position = UDim2.new(0.5, 0, 0.5, 0)
     Main.Size = UDim2.new(1, -47, 1, -47)
@@ -870,25 +1064,30 @@ function Chloex:Window(GuiConfig)
 
     UICorner.Parent = Main
 
-    Top.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+    Top.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
     Top.BackgroundTransparency = 0.9990000128746033
-    Top.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    Top.BorderColor3 = Color3.fromRGB(15, 15, 15)
     Top.BorderSizePixel = 0
     Top.Size = UDim2.new(1, 0, 0, 38)
     Top.Name = "Top"
     Top.Parent = Main
+
+    local HeaderRow1Y = 14
+    local HeaderRow2Y = 27
 
     TextLabel.Font = Enum.Font.GothamBold
     TextLabel.Text = GuiConfig.Title
     TextLabel.TextColor3 = GuiConfig.Color
     TextLabel.TextSize = 14
     TextLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TextLabel.TextYAlignment = Enum.TextYAlignment.Center
     TextLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     TextLabel.BackgroundTransparency = 0.9990000128746033
-    TextLabel.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    TextLabel.BorderColor3 = Color3.fromRGB(15, 15, 15)
     TextLabel.BorderSizePixel = 0
-    TextLabel.Size = UDim2.new(1, -100, 1, 0)
-    TextLabel.Position = UDim2.new(0, 10, 0, 0)
+    TextLabel.AnchorPoint = Vector2.new(0, 0.5)
+    TextLabel.Size = UDim2.new(1, -100, 0, 16)
+    TextLabel.Position = UDim2.new(0, 10, 0, HeaderRow1Y)
     TextLabel.Parent = Top
 
     UICorner1.Parent = Top
@@ -903,7 +1102,7 @@ function Chloex:Window(GuiConfig)
         Divider.BackgroundTransparency = 0.75
         Divider.BorderSizePixel = 0
         Divider.AnchorPoint = Vector2.new(0, 0.5)
-        Divider.Position = UDim2.new(0, baseX, 0.5, 0)
+        Divider.Position = UDim2.new(0, baseX, 0, HeaderRow1Y)
         Divider.Size = UDim2.new(0, 1, 0, 16)
         Divider.Name = "DiscordDivider"
         Divider.Parent = Top
@@ -913,12 +1112,12 @@ function Chloex:Window(GuiConfig)
         DividerCorner.Parent = Divider
 
         local DiscordImg = Instance.new("ImageLabel")
-        DiscordImg.Image = Icons.discord
+        DiscordImg.Image = discord_logo_asset_id
         DiscordImg.ImageColor3 = Color3.fromRGB(88, 101, 242)
         DiscordImg.BackgroundTransparency = 1
         DiscordImg.ScaleType = Enum.ScaleType.Fit
         DiscordImg.AnchorPoint = Vector2.new(0, 0.5)
-        DiscordImg.Position = UDim2.new(0, baseX + 10, 0.5, 0)
+        DiscordImg.Position = UDim2.new(0, baseX + 10, 0, HeaderRow1Y)
         DiscordImg.Size = UDim2.new(0, 16, 0, 16)
         DiscordImg.Name = "DiscordImg"
         DiscordImg.Parent = Top
@@ -929,8 +1128,8 @@ function Chloex:Window(GuiConfig)
         DiscordBtn.BackgroundTransparency = 1
         DiscordBtn.BorderSizePixel = 0
         DiscordBtn.AnchorPoint = Vector2.new(0, 0.5)
-        DiscordBtn.Position = UDim2.new(0, baseX + 8, 0.5, 0)
-        DiscordBtn.Size = UDim2.new(0, 0, 1, 0)
+        DiscordBtn.Position = UDim2.new(0, baseX + 8, 0, HeaderRow1Y)
+        DiscordBtn.Size = UDim2.new(0, 0, 0, 16)
         DiscordBtn.Name = "DiscordBtn"
         DiscordBtn.Parent = Top
 
@@ -953,32 +1152,74 @@ function Chloex:Window(GuiConfig)
         DiscordButtonRef = DiscordBtn
     end
 
+    local authorOffset = 0
+    if GuiConfig.Author and GuiConfig.Author ~= "" then
+        local titleAuthorDividerX = TextLabel.TextBounds.X + 15 + discordOffset
+
+        local TitleAuthorDivider = Instance.new("Frame")
+        TitleAuthorDivider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        TitleAuthorDivider.BackgroundTransparency = 0.75
+        TitleAuthorDivider.BorderSizePixel = 0
+        TitleAuthorDivider.AnchorPoint = Vector2.new(0, 0.5)
+        TitleAuthorDivider.Position = UDim2.new(0, titleAuthorDividerX, 0, HeaderRow1Y)
+        TitleAuthorDivider.Size = UDim2.new(0, 1, 0, 16)
+        TitleAuthorDivider.Name = "TitleAuthorDivider"
+        TitleAuthorDivider.Parent = Top
+
+        local TitleAuthorDividerCorner = Instance.new("UICorner")
+        TitleAuthorDividerCorner.CornerRadius = UDim.new(1, 0)
+        TitleAuthorDividerCorner.Parent = TitleAuthorDivider
+
+        authorOffset = 7.5
+    end
+
     TextLabel1.Font = Enum.Font.GothamBold
-    TextLabel1.Text = GuiConfig.Footer
+    TextLabel1.Text = GuiConfig.Author
     TextLabel1.TextColor3 = Color3.fromRGB(255, 255, 255)
-    TextLabel1.TextSize = 12
+    TextLabel1.TextSize = 14
     TextLabel1.TextTransparency = 0
     TextLabel1.TextXAlignment = Enum.TextXAlignment.Left
+    TextLabel1.TextYAlignment = Enum.TextYAlignment.Center
     TextLabel1.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     TextLabel1.BackgroundTransparency = 0.9990000128746033
-    TextLabel1.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    TextLabel1.BorderColor3 = Color3.fromRGB(15, 15, 15)
     TextLabel1.BorderSizePixel = 0
-    TextLabel1.Size = UDim2.new(1, -(TextLabel.TextBounds.X + 104 + discordOffset), 1, 0)
-    TextLabel1.Position = UDim2.new(0, TextLabel.TextBounds.X + 15 + discordOffset, 0, 0)
+    TextLabel1.AnchorPoint = Vector2.new(0, 0.5)
+    TextLabel1.Size = UDim2.new(1, -(TextLabel.TextBounds.X + 104 + discordOffset + authorOffset), 0, 16)
+    TextLabel1.Position = UDim2.new(0, TextLabel.TextBounds.X + 15 + discordOffset + authorOffset, 0, HeaderRow1Y)
+    TextLabel1.Name = "AuthorLabel"
     TextLabel1.Parent = Top
 
+    local FooterLabel = Instance.new("TextLabel")
+    FooterLabel.Font = Enum.Font.GothamBold
+    FooterLabel.Text = GuiConfig.Footer
+    FooterLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    FooterLabel.TextTransparency = 0.4
+    FooterLabel.TextSize = 12
+    FooterLabel.TextXAlignment = Enum.TextXAlignment.Left
+    FooterLabel.TextYAlignment = Enum.TextYAlignment.Center
+    FooterLabel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    FooterLabel.BackgroundTransparency = 1
+    FooterLabel.BorderColor3 = Color3.fromRGB(15, 15, 15)
+    FooterLabel.BorderSizePixel = 0
+    FooterLabel.AnchorPoint = Vector2.new(0, 0.5)
+    FooterLabel.Size = UDim2.new(1, -100, 0, 14)
+    FooterLabel.Position = UDim2.new(0, 10, 0, HeaderRow2Y)
+    FooterLabel.Name = "FooterLabel"
+    FooterLabel.Parent = Top
+
     if DiscordButtonRef then
-        DiscordButtonRef.Size = UDim2.new(0, discordOffset + TextLabel1.TextBounds.X + 6, 1, 0)
+        DiscordButtonRef.Size = UDim2.new(0, discordOffset + TextLabel1.TextBounds.X + 6, 0, 16)
     end
 
     Close.Font = Enum.Font.SourceSans
     Close.Text = ""
-    Close.TextColor3 = Color3.fromRGB(17, 17, 23)
+    Close.TextColor3 = Color3.fromRGB(15, 15, 15)
     Close.TextSize = 14
     Close.AnchorPoint = Vector2.new(1, 0.5)
     Close.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     Close.BackgroundTransparency = 0.9990000128746033
-    Close.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    Close.BorderColor3 = Color3.fromRGB(15, 15, 15)
     Close.BorderSizePixel = 0
     Close.Position = UDim2.new(1, -8, 0.5, 0)
     Close.Size = UDim2.new(0, 25, 0, 25)
@@ -989,7 +1230,7 @@ function Chloex:Window(GuiConfig)
     ImageLabel1.AnchorPoint = Vector2.new(0.5, 0.5)
     ImageLabel1.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     ImageLabel1.BackgroundTransparency = 0.9990000128746033
-    ImageLabel1.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    ImageLabel1.BorderColor3 = Color3.fromRGB(15, 15, 15)
     ImageLabel1.BorderSizePixel = 0
     ImageLabel1.Position = UDim2.new(0.49, 0, 0.5, 0)
     ImageLabel1.Size = UDim2.new(1, -8, 1, -8)
@@ -997,12 +1238,12 @@ function Chloex:Window(GuiConfig)
 
     Min.Font = Enum.Font.SourceSans
     Min.Text = ""
-    Min.TextColor3 = Color3.fromRGB(17, 17, 23)
+    Min.TextColor3 = Color3.fromRGB(15, 15, 15)
     Min.TextSize = 14
     Min.AnchorPoint = Vector2.new(1, 0.5)
     Min.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     Min.BackgroundTransparency = 0.9990000128746033
-    Min.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    Min.BorderColor3 = Color3.fromRGB(15, 15, 15)
     Min.BorderSizePixel = 0
     Min.Position = UDim2.new(1, -38, 0.5, 0)
     Min.Size = UDim2.new(0, 25, 0, 25)
@@ -1014,7 +1255,7 @@ function Chloex:Window(GuiConfig)
     ImageLabel2.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     ImageLabel2.BackgroundTransparency = 0.9990000128746033
     ImageLabel2.ImageTransparency = 0.2
-    ImageLabel2.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    ImageLabel2.BorderColor3 = Color3.fromRGB(15, 15, 15)
     ImageLabel2.BorderSizePixel = 0
     ImageLabel2.Position = UDim2.new(0.5, 0, 0.5, 0)
     ImageLabel2.Size = UDim2.new(1, -9, 1, -9)
@@ -1022,7 +1263,7 @@ function Chloex:Window(GuiConfig)
 
     LayersTab.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     LayersTab.BackgroundTransparency = 0.9990000128746033
-    LayersTab.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    LayersTab.BorderColor3 = Color3.fromRGB(15, 15, 15)
     LayersTab.BorderSizePixel = 0
     LayersTab.Position = UDim2.new(0, 9, 0, 50)
     LayersTab.Size = UDim2.new(0, GuiConfig["Tab Width"], 1, -59)
@@ -1035,7 +1276,7 @@ function Chloex:Window(GuiConfig)
     DecideFrame.AnchorPoint = Vector2.new(0.5, 0)
     DecideFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     DecideFrame.BackgroundTransparency = 0.85
-    DecideFrame.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    DecideFrame.BorderColor3 = Color3.fromRGB(15, 15, 15)
     DecideFrame.BorderSizePixel = 0
     DecideFrame.Position = UDim2.new(0.5, 0, 0, 38)
     DecideFrame.Size = UDim2.new(1, 0, 0, 1)
@@ -1044,7 +1285,7 @@ function Chloex:Window(GuiConfig)
 
     Layers.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     Layers.BackgroundTransparency = 0.9990000128746033
-    Layers.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    Layers.BorderColor3 = Color3.fromRGB(15, 15, 15)
     Layers.BorderSizePixel = 0
     Layers.Position = UDim2.new(0, GuiConfig["Tab Width"] + 18, 0, 50)
     Layers.Size = UDim2.new(1, -(GuiConfig["Tab Width"] + 9 + 18), 1, -59)
@@ -1062,7 +1303,7 @@ function Chloex:Window(GuiConfig)
     NameTab.TextXAlignment = Enum.TextXAlignment.Left
     NameTab.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     NameTab.BackgroundTransparency = 0.9990000128746033
-    NameTab.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    NameTab.BorderColor3 = Color3.fromRGB(15, 15, 15)
     NameTab.BorderSizePixel = 0
     NameTab.Size = UDim2.new(1, 0, 0, 30)
     NameTab.Name = "NameTab"
@@ -1071,7 +1312,7 @@ function Chloex:Window(GuiConfig)
     LayersReal.AnchorPoint = Vector2.new(0, 1)
     LayersReal.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     LayersReal.BackgroundTransparency = 0.9990000128746033
-    LayersReal.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    LayersReal.BorderColor3 = Color3.fromRGB(15, 15, 15)
     LayersReal.BorderSizePixel = 0
     LayersReal.ClipsDescendants = true
     LayersReal.Position = UDim2.new(0, 0, 1, 0)
@@ -1093,12 +1334,12 @@ function Chloex:Window(GuiConfig)
     local UIListLayout = Instance.new("UIListLayout");
 
     ScrollTab.CanvasSize = UDim2.new(0, 0, 1.10000002, 0)
-    ScrollTab.ScrollBarImageColor3 = Color3.fromRGB(17, 17, 23)
+    ScrollTab.ScrollBarImageColor3 = Color3.fromRGB(15, 15, 15)
     ScrollTab.ScrollBarThickness = 0
     ScrollTab.Active = true
     ScrollTab.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     ScrollTab.BackgroundTransparency = 0.9990000128746033
-    ScrollTab.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    ScrollTab.BorderColor3 = Color3.fromRGB(15, 15, 15)
     ScrollTab.BorderSizePixel = 0
     if GuiConfig.Search then
         ScrollTab.Position = UDim2.new(0, 0, 0, 34)
@@ -1141,7 +1382,7 @@ function Chloex:Window(GuiConfig)
         SearchCorner.Parent = SearchBar
 
         local SearchIcon = Instance.new("ImageLabel")
-        SearchIcon.Image = Icons.scan
+        ApplyIcon(SearchIcon, "search", 24)
         SearchIcon.ImageColor3 = Color3.fromRGB(200, 200, 200)
         SearchIcon.BackgroundTransparency = 1
         SearchIcon.ScaleType = Enum.ScaleType.Fit
@@ -1169,7 +1410,7 @@ function Chloex:Window(GuiConfig)
 
         SearchResults = Instance.new("ScrollingFrame")
         SearchResults.Active = true
-        SearchResults.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+        SearchResults.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
         SearchResults.BackgroundTransparency = 0.05
         SearchResults.BorderSizePixel = 0
         SearchResults.ScrollBarThickness = 2
@@ -1316,8 +1557,8 @@ function Chloex:Window(GuiConfig)
     end
 
     function GuiFunc:DestroyGui()
-        if CoreGui:FindFirstChild("NatUI") then
-            NatUI:Destroy()
+        if CoreGui:FindFirstChild("BHub") then
+            BHub:Destroy()
         end
     end
 
@@ -1330,7 +1571,7 @@ function Chloex:Window(GuiConfig)
 
         local Overlay = Instance.new("Frame")
         Overlay.Size = UDim2.new(1, 0, 1, 0)
-        Overlay.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+        Overlay.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
         Overlay.BackgroundTransparency = 0.3
         Overlay.ZIndex = 50
         Overlay.Parent = DropShadowHolder
@@ -1339,6 +1580,7 @@ function Chloex:Window(GuiConfig)
         Dialog.Size = UDim2.new(0, 300, 0, 150)
         Dialog.Position = UDim2.new(0.5, -150, 0.5, -75)
         Dialog.Image = "rbxassetid://9542022979"
+        Dialog.ImageColor3 = Color3.fromRGB(10, 10, 10)
         Dialog.ImageTransparency = 0
         Dialog.BorderSizePixel = 0
         Dialog.ZIndex = 51
@@ -1360,11 +1602,11 @@ function Chloex:Window(GuiConfig)
 
         local Gradient = Instance.new("UIGradient")
         Gradient.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0.0, Color3.fromRGB(0, 191, 255)),
+            ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 255, 255)),
             ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 140, 255)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(190, 190, 190)),
             ColorSequenceKeypoint.new(0.75, Color3.fromRGB(255, 255, 255)),
-            ColorSequenceKeypoint.new(1.0, Color3.fromRGB(0, 191, 255))
+            ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 255, 255))
         })
         Gradient.Rotation = 90
         Gradient.Parent = DialogGlow
@@ -1395,13 +1637,13 @@ function Chloex:Window(GuiConfig)
         local Yes = Instance.new("TextButton")
         Yes.Size = UDim2.new(0.45, -10, 0, 35)
         Yes.Position = UDim2.new(0.05, 0, 1, -55)
-        Yes.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        Yes.BackgroundTransparency = 0.935
+        Yes.BackgroundColor3 = Color3.fromRGB(34, 34, 34)
+        Yes.BackgroundTransparency = 0.1
         Yes.Text = "Yes"
         Yes.Font = Enum.Font.GothamBold
         Yes.TextSize = 15
         Yes.TextColor3 = Color3.fromRGB(255, 255, 255)
-        Yes.TextTransparency = 0.3
+        Yes.TextTransparency = 0
         Yes.ZIndex = 52
         Yes.Name = "Yes"
         Yes.Parent = Dialog
@@ -1410,20 +1652,20 @@ function Chloex:Window(GuiConfig)
         local Cancel = Instance.new("TextButton")
         Cancel.Size = UDim2.new(0.45, -10, 0, 35)
         Cancel.Position = UDim2.new(0.5, 10, 1, -55)
-        Cancel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        Cancel.BackgroundTransparency = 0.935
+        Cancel.BackgroundColor3 = Color3.fromRGB(34, 34, 34)
+        Cancel.BackgroundTransparency = 0.1
         Cancel.Text = "Cancel"
         Cancel.Font = Enum.Font.GothamBold
         Cancel.TextSize = 15
         Cancel.TextColor3 = Color3.fromRGB(255, 255, 255)
-        Cancel.TextTransparency = 0.3
+        Cancel.TextTransparency = 0
         Cancel.ZIndex = 52
         Cancel.Name = "Cancel"
         Cancel.Parent = Dialog
         Instance.new("UICorner", Cancel).CornerRadius = UDim.new(0, 6)
 
         Yes.MouseButton1Click:Connect(function()
-            if NatUI then NatUI:Destroy() end
+            if BHub then BHub:Destroy() end
             if game.CoreGui:FindFirstChild("ToggleUIButton") then
                 game.CoreGui.ToggleUIButton:Destroy()
             end
@@ -1509,9 +1751,9 @@ function Chloex:Window(GuiConfig)
     local ConnectButton = Instance.new("TextButton");
 
     MoreBlur.AnchorPoint = Vector2.new(1, 1)
-    MoreBlur.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+    MoreBlur.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
     MoreBlur.BackgroundTransparency = 0.999
-    MoreBlur.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    MoreBlur.BorderColor3 = Color3.fromRGB(15, 15, 15)
     MoreBlur.BorderSizePixel = 0
     MoreBlur.ClipsDescendants = true
     MoreBlur.Position = UDim2.new(1, 8, 1, 8)
@@ -1528,7 +1770,7 @@ function Chloex:Window(GuiConfig)
     DropShadowHolder1.Parent = MoreBlur
 
     DropShadow1.Image = "rbxassetid://6015897843"
-    DropShadow1.ImageColor3 = Color3.fromRGB(17, 17, 23)
+    DropShadow1.ImageColor3 = Color3.fromRGB(15, 15, 15)
     DropShadow1.ImageTransparency = 1
     DropShadow1.ScaleType = Enum.ScaleType.Slice
     DropShadow1.SliceCenter = Rect.new(49, 49, 450, 450)
@@ -1545,11 +1787,11 @@ function Chloex:Window(GuiConfig)
 
     ConnectButton.Font = Enum.Font.SourceSans
     ConnectButton.Text = ""
-    ConnectButton.TextColor3 = Color3.fromRGB(17, 17, 23)
+    ConnectButton.TextColor3 = Color3.fromRGB(15, 15, 15)
     ConnectButton.TextSize = 14
     ConnectButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     ConnectButton.BackgroundTransparency = 0.999
-    ConnectButton.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    ConnectButton.BorderColor3 = Color3.fromRGB(15, 15, 15)
     ConnectButton.BorderSizePixel = 0
     ConnectButton.Size = UDim2.new(1, 0, 1, 0)
     ConnectButton.Name = "ConnectButton"
@@ -1563,8 +1805,9 @@ function Chloex:Window(GuiConfig)
     local DropPageLayout = Instance.new("UIPageLayout");
 
     DropdownSelect.AnchorPoint = Vector2.new(1, 0.5)
-    DropdownSelect.BackgroundColor3 = Color3.fromRGB(30.00000011175871, 30.00000011175871, 30.00000011175871)
-    DropdownSelect.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    DropdownSelect.BackgroundColor3 = Color3.fromRGB(26, 26, 26)
+    DropdownSelect.BackgroundTransparency = 0.15
+    DropdownSelect.BorderColor3 = Color3.fromRGB(15, 15, 15)
     DropdownSelect.BorderSizePixel = 0
     DropdownSelect.LayoutOrder = 1
     DropdownSelect.Position = UDim2.new(1, 172, 0.5, 0)
@@ -1584,15 +1827,15 @@ function Chloex:Window(GuiConfig)
     UICorner36.CornerRadius = UDim.new(0, 3)
     UICorner36.Parent = DropdownSelect
 
-    UIStroke14.Color = Color3.fromRGB(12, 159, 255)
+    UIStroke14.Color = Color3.fromRGB(255, 255, 255)
     UIStroke14.Thickness = 2.5
     UIStroke14.Transparency = 0.8
     UIStroke14.Parent = DropdownSelect
 
     DropdownSelectReal.AnchorPoint = Vector2.new(0.5, 0.5)
-    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(0, 27, 98)
-    DropdownSelectReal.BackgroundTransparency = 0.7
-    DropdownSelectReal.BorderColor3 = Color3.fromRGB(17, 17, 23)
+    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    DropdownSelectReal.BackgroundTransparency = 0.4
+    DropdownSelectReal.BorderColor3 = Color3.fromRGB(15, 15, 15)
     DropdownSelectReal.BorderSizePixel = 0
     DropdownSelectReal.LayoutOrder = 1
     DropdownSelectReal.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -1628,7 +1871,7 @@ function Chloex:Window(GuiConfig)
         ScrolLayers.LayoutOrder = CountTab
         ScrolLayers.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         ScrolLayers.BackgroundTransparency = 0.9990000128746033
-        ScrolLayers.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        ScrolLayers.BorderColor3 = Color3.fromRGB(15, 15, 15)
         ScrolLayers.BorderSizePixel = 0
         ScrolLayers.Size = UDim2.new(1, 0, 1, 0)
         ScrolLayers.Name = "ScrolLayers"
@@ -1652,7 +1895,7 @@ function Chloex:Window(GuiConfig)
         else
             Tab.BackgroundTransparency = 0.9990000128746033
         end
-        Tab.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        Tab.BorderColor3 = Color3.fromRGB(15, 15, 15)
         Tab.BorderSizePixel = 0
         Tab.LayoutOrder = CountTab
         Tab.Size = UDim2.new(1, 0, 0, 30)
@@ -1669,20 +1912,20 @@ function Chloex:Window(GuiConfig)
         TabButton.TextXAlignment = Enum.TextXAlignment.Left
         TabButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         TabButton.BackgroundTransparency = 0.9990000128746033
-        TabButton.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        TabButton.BorderColor3 = Color3.fromRGB(15, 15, 15)
         TabButton.BorderSizePixel = 0
         TabButton.Size = UDim2.new(1, 0, 1, 0)
         TabButton.Name = "TabButton"
         TabButton.Parent = Tab
 
         TabName.Font = Enum.Font.GothamBold
-        TabName.Text = "[ " .. tostring(TabConfig.Name) .. " ]"
+        TabName.Text = tostring(TabConfig.Name)
         TabName.TextColor3 = Color3.fromRGB(255, 255, 255)
         TabName.TextSize = 13
         TabName.TextXAlignment = Enum.TextXAlignment.Left
         TabName.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         TabName.BackgroundTransparency = 0.9990000128746033
-        TabName.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        TabName.BorderColor3 = Color3.fromRGB(15, 15, 15)
         TabName.BorderSizePixel = 0
         TabName.Size = UDim2.new(1, 0, 1, 0)
         TabName.Position = UDim2.new(0, 30, 0, 0)
@@ -1691,7 +1934,7 @@ function Chloex:Window(GuiConfig)
 
         FeatureImg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         FeatureImg.BackgroundTransparency = 0.9990000128746033
-        FeatureImg.BorderColor3 = Color3.fromRGB(17, 17, 23)
+        FeatureImg.BorderColor3 = Color3.fromRGB(15, 15, 15)
         FeatureImg.BorderSizePixel = 0
         FeatureImg.Position = UDim2.new(0, 9, 0, 7)
         FeatureImg.Size = UDim2.new(0, 16, 0, 16)
@@ -1702,7 +1945,7 @@ function Chloex:Window(GuiConfig)
             NameTab.Text = TabConfig.Name
             local ChooseFrame = Instance.new("Frame");
             ChooseFrame.BackgroundColor3 = GuiConfig.Color
-            ChooseFrame.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            ChooseFrame.BorderColor3 = Color3.fromRGB(15, 15, 15)
             ChooseFrame.BorderSizePixel = 0
             ChooseFrame.Position = UDim2.new(0, 2, 0, 9)
             ChooseFrame.Size = UDim2.new(0, 1, 0, 12)
@@ -1717,11 +1960,7 @@ function Chloex:Window(GuiConfig)
         end
 
         if TabConfig.Icon ~= "" then
-            if Icons[TabConfig.Icon] then
-                FeatureImg.Image = Icons[TabConfig.Icon]
-            else
-                FeatureImg.Image = TabConfig.Icon
-            end
+            ApplyIcon(FeatureImg, TabConfig.Icon, 24)
         end
 
         local function switchToTab(force)
@@ -1797,7 +2036,7 @@ function Chloex:Window(GuiConfig)
 
             Section.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             Section.BackgroundTransparency = 0.9990000128746033
-            Section.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            Section.BorderColor3 = Color3.fromRGB(15, 15, 15)
             Section.BorderSizePixel = 0
             Section.LayoutOrder = CountSection
             Section.ClipsDescendants = true
@@ -1817,7 +2056,7 @@ function Chloex:Window(GuiConfig)
             SectionReal.AnchorPoint = Vector2.new(0.5, 0)
             SectionReal.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             SectionReal.BackgroundTransparency = 0.9350000023841858
-            SectionReal.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            SectionReal.BorderColor3 = Color3.fromRGB(15, 15, 15)
             SectionReal.BorderSizePixel = 0
             SectionReal.LayoutOrder = 1
             SectionReal.Position = UDim2.new(0.5, 0, 0, 0)
@@ -1830,20 +2069,20 @@ function Chloex:Window(GuiConfig)
 
             SectionButton.Font = Enum.Font.SourceSans
             SectionButton.Text = ""
-            SectionButton.TextColor3 = Color3.fromRGB(17, 17, 23)
+            SectionButton.TextColor3 = Color3.fromRGB(15, 15, 15)
             SectionButton.TextSize = 14
             SectionButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             SectionButton.BackgroundTransparency = 0.9990000128746033
-            SectionButton.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            SectionButton.BorderColor3 = Color3.fromRGB(15, 15, 15)
             SectionButton.BorderSizePixel = 0
             SectionButton.Size = UDim2.new(1, 0, 1, 0)
             SectionButton.Name = "SectionButton"
             SectionButton.Parent = SectionReal
 
             FeatureFrame.AnchorPoint = Vector2.new(1, 0.5)
-            FeatureFrame.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+            FeatureFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
             FeatureFrame.BackgroundTransparency = 0.9990000128746033
-            FeatureFrame.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            FeatureFrame.BorderColor3 = Color3.fromRGB(15, 15, 15)
             FeatureFrame.BorderSizePixel = 0
             FeatureFrame.Position = UDim2.new(1, -5, 0.5, 0)
             FeatureFrame.Size = UDim2.new(0, 20, 0, 20)
@@ -1854,7 +2093,7 @@ function Chloex:Window(GuiConfig)
             FeatureImg.AnchorPoint = Vector2.new(0.5, 0.5)
             FeatureImg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             FeatureImg.BackgroundTransparency = 0.9990000128746033
-            FeatureImg.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            FeatureImg.BorderColor3 = Color3.fromRGB(15, 15, 15)
             FeatureImg.BorderSizePixel = 0
             FeatureImg.Position = UDim2.new(0.5, 0, 0.5, 0)
             FeatureImg.Rotation = -90
@@ -1871,7 +2110,7 @@ function Chloex:Window(GuiConfig)
             SectionTitle.AnchorPoint = Vector2.new(0, 0.5)
             SectionTitle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             SectionTitle.BackgroundTransparency = 0.9990000128746033
-            SectionTitle.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            SectionTitle.BorderColor3 = Color3.fromRGB(15, 15, 15)
             SectionTitle.BorderSizePixel = 0
             SectionTitle.Position = UDim2.new(0, 10, 0.5, 0)
             SectionTitle.Size = UDim2.new(1, -50, 0, 13)
@@ -1879,7 +2118,7 @@ function Chloex:Window(GuiConfig)
             SectionTitle.Parent = SectionReal
 
             SectionDecideFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-            SectionDecideFrame.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            SectionDecideFrame.BorderColor3 = Color3.fromRGB(15, 15, 15)
             SectionDecideFrame.AnchorPoint = Vector2.new(0.5, 0)
             SectionDecideFrame.BorderSizePixel = 0
             SectionDecideFrame.Position = UDim2.new(0.5, 0, 0, 33)
@@ -1890,9 +2129,9 @@ function Chloex:Window(GuiConfig)
             UICorner1.Parent = SectionDecideFrame
 
             UIGradient.Color = ColorSequence.new {
-                ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 20)),
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 22, 22)),
                 ColorSequenceKeypoint.new(0.5, GuiConfig.Color),
-                ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 20))
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 22))
             }
             UIGradient.Parent = SectionDecideFrame
 
@@ -1903,7 +2142,7 @@ function Chloex:Window(GuiConfig)
             SectionAdd.AnchorPoint = Vector2.new(0.5, 0)
             SectionAdd.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
             SectionAdd.BackgroundTransparency = 0.9990000128746033
-            SectionAdd.BorderColor3 = Color3.fromRGB(17, 17, 23)
+            SectionAdd.BorderColor3 = Color3.fromRGB(15, 15, 15)
             SectionAdd.BorderSizePixel = 0
             SectionAdd.ClipsDescendants = true
             SectionAdd.LayoutOrder = 1
@@ -1920,34 +2159,48 @@ function Chloex:Window(GuiConfig)
             UIListLayout2.Parent = SectionAdd
 
             local OpenSection = false
-
+            local scrollUpdatePending = false
             local function UpdateSizeScroll()
-                local OffsetY = 0
-                for _, child in ScrolLayers:GetChildren() do
-                    if child.Name ~= "UIListLayout" then
-                        OffsetY = OffsetY + 3 + child.Size.Y.Offset
+                if scrollUpdatePending then return end
+                scrollUpdatePending = true
+                task.defer(function()
+                    scrollUpdatePending = false
+                    local OffsetY = 0
+                    for _, child in ScrolLayers:GetChildren() do
+                        if child.Name ~= "UIListLayout" then
+                            OffsetY = OffsetY + 3 + child.Size.Y.Offset
+                        end
                     end
-                end
-                ScrolLayers.CanvasSize = UDim2.new(0, 0, 0, OffsetY)
+                    ScrolLayers.CanvasSize = UDim2.new(0, 0, 0, OffsetY)
+                end)
             end
 
+            local sectionUpdatePending = false
             local function UpdateSizeSection()
-                if OpenSection then
+                if not OpenSection then return end
+                if sectionUpdatePending then return end
+                sectionUpdatePending = true
+                task.defer(function()
+                    sectionUpdatePending = false
+                    if not OpenSection then return end
+
                     local SectionSizeYWitdh = 38
                     for _, v in SectionAdd:GetChildren() do
                         if v.Name ~= "UIListLayout" and v.Name ~= "UICorner" then
                             SectionSizeYWitdh = SectionSizeYWitdh + v.Size.Y.Offset + 3
                         end
                     end
-                    TweenService:Create(FeatureFrame, TweenInfo.new(0.5), { Rotation = 90 }):Play()
-                    TweenService:Create(Section, TweenInfo.new(0.5), { Size = UDim2.new(1, 1, 0, SectionSizeYWitdh) })
-                        :Play()
-                    TweenService:Create(SectionAdd, TweenInfo.new(0.5),
-                        { Size = UDim2.new(1, 0, 0, SectionSizeYWitdh - 38) }):Play()
-                    TweenService:Create(SectionDecideFrame, TweenInfo.new(0.5), { Size = UDim2.new(1, 0, 0, 2) }):Play()
-                    task.wait(0.5)
-                    UpdateSizeScroll()
-                end
+                    pcall(function()
+                        TweenService:Create(FeatureFrame, TweenInfo.new(0.5), { Rotation = 90 }):Play()
+                        TweenService:Create(Section, TweenInfo.new(0.5), { Size = UDim2.new(1, 1, 0, SectionSizeYWitdh) })
+                            :Play()
+                        TweenService:Create(SectionAdd, TweenInfo.new(0.5),
+                            { Size = UDim2.new(1, 0, 0, SectionSizeYWitdh - 38) }):Play()
+                        TweenService:Create(SectionDecideFrame, TweenInfo.new(0.5), { Size = UDim2.new(1, 0, 0, 2) })
+                            :Play()
+                    end)
+                    task.delay(0.5, UpdateSizeScroll)
+                end)
             end
 
             if AlwaysOpen == true then
@@ -1971,8 +2224,7 @@ function Chloex:Window(GuiConfig)
                         TweenService:Create(SectionDecideFrame, TweenInfo.new(0.5), { Size = UDim2.new(0, 0, 0, 2) })
                             :Play()
                         OpenSection = false
-                        task.wait(0.5)
-                        UpdateSizeScroll()
+                        task.delay(0.5, UpdateSizeScroll)
                     else
                         OpenSection = true
                         UpdateSizeSection()
@@ -2040,11 +2292,7 @@ function Chloex:Window(GuiConfig)
                     IconImg.Name = "ParagraphIcon"
                     IconImg.Parent = Paragraph
 
-                    if Icons and Icons[ParagraphConfig.Icon] then
-                        IconImg.Image = Icons[ParagraphConfig.Icon]
-                    else
-                        IconImg.Image = ParagraphConfig.Icon
-                    end
+                    ApplyIcon(IconImg, ParagraphConfig.Icon, 24)
 
                     iconOffset = 30
                 end
@@ -2588,7 +2836,7 @@ function Chloex:Window(GuiConfig)
 
                 Slider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 Slider.BackgroundTransparency = 0.9350000023841858
-                Slider.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                Slider.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 Slider.BorderSizePixel = 0
                 Slider.LayoutOrder = CountItem
                 Slider.Size = UDim2.new(1, 0, 0, 46)
@@ -2606,7 +2854,7 @@ function Chloex:Window(GuiConfig)
                 SliderTitle.TextYAlignment = Enum.TextYAlignment.Top
                 SliderTitle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 SliderTitle.BackgroundTransparency = 0.9990000128746033
-                SliderTitle.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                SliderTitle.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 SliderTitle.BorderSizePixel = 0
                 SliderTitle.Position = UDim2.new(0, 10, 0, 10)
                 SliderTitle.Size = UDim2.new(1, -230, 0, 13)
@@ -2622,7 +2870,7 @@ function Chloex:Window(GuiConfig)
                 SliderContent.TextYAlignment = Enum.TextYAlignment.Bottom
                 SliderContent.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 SliderContent.BackgroundTransparency = 0.9990000128746033
-                SliderContent.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                SliderContent.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 SliderContent.BorderSizePixel = 0
                 SliderContent.Position = UDim2.new(0, 10, 0, 25)
                 SliderContent.Size = UDim2.new(1, -230, 0, 12)
@@ -2646,7 +2894,7 @@ function Chloex:Window(GuiConfig)
 
                 SliderInput.AnchorPoint = Vector2.new(0, 0.5)
                 SliderInput.BackgroundColor3 = GuiConfig.Color
-                SliderInput.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                SliderInput.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 SliderInput.BackgroundTransparency = 1
                 SliderInput.BorderSizePixel = 0
                 SliderInput.Position = UDim2.new(1, -200, 0.5, 0)
@@ -2662,9 +2910,9 @@ function Chloex:Window(GuiConfig)
                 TextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
                 TextBox.TextSize = 13
                 TextBox.TextWrapped = true
-                TextBox.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+                TextBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
                 TextBox.BackgroundTransparency = 0.9990000128746033
-                TextBox.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                TextBox.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 TextBox.BorderSizePixel = 0
                 TextBox.Position = UDim2.new(0, -1, 0, 0)
                 TextBox.Size = UDim2.new(1, 0, 1, 0)
@@ -2673,7 +2921,7 @@ function Chloex:Window(GuiConfig)
                 SliderFrame.AnchorPoint = Vector2.new(1, 0.5)
                 SliderFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 SliderFrame.BackgroundTransparency = 0.800000011920929
-                SliderFrame.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                SliderFrame.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 SliderFrame.BorderSizePixel = 0
                 SliderFrame.Position = UDim2.new(1, -20, 0.5, 0)
                 SliderFrame.Size = UDim2.new(0, 140, 0, 3)
@@ -2684,7 +2932,7 @@ function Chloex:Window(GuiConfig)
 
                 SliderDraggable.AnchorPoint = Vector2.new(0, 0.5)
                 SliderDraggable.BackgroundColor3 = GuiConfig.Color
-                SliderDraggable.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                SliderDraggable.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 SliderDraggable.BorderSizePixel = 0
                 SliderDraggable.Position = UDim2.new(0, 0, 0.5, 0)
                 SliderDraggable.Size = UDim2.new(0.899999976, 0, 0, 1)
@@ -2695,7 +2943,7 @@ function Chloex:Window(GuiConfig)
 
                 SliderCircle.AnchorPoint = Vector2.new(1, 0.5)
                 SliderCircle.BackgroundColor3 = GuiConfig.Color
-                SliderCircle.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                SliderCircle.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 SliderCircle.BorderSizePixel = 0
                 SliderCircle.Position = UDim2.new(1, 4, 0.5, 0)
                 SliderCircle.Size = UDim2.new(0, 8, 0, 8)
@@ -2706,6 +2954,17 @@ function Chloex:Window(GuiConfig)
 
                 UIStroke6.Color = GuiConfig.Color
                 UIStroke6.Parent = SliderCircle
+
+                local SliderHitbox = Instance.new("Frame")
+                SliderHitbox.AnchorPoint = Vector2.new(1, 0.5)
+                SliderHitbox.BackgroundTransparency = 1
+                SliderHitbox.BorderSizePixel = 0
+                SliderHitbox.Position = UDim2.new(1, -20, 0.5, 0)
+                SliderHitbox.Size = UDim2.new(0, 140, 0, 36)
+                SliderHitbox.ZIndex = 5
+                SliderHitbox.Active = true
+                SliderHitbox.Name = "SliderHitbox"
+                SliderHitbox.Parent = Slider
 
                 local Dragging = false
                 local UpdatingText = false
@@ -2768,7 +3027,7 @@ function Chloex:Window(GuiConfig)
                     ApplySliderValue(Value, noSave, false, true)
                 end
 
-                SliderFrame.InputBegan:Connect(function(Input)
+                SliderHitbox.InputBegan:Connect(function(Input)
                     if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                         Dragging = true
                         TweenService:Create(
@@ -2798,7 +3057,7 @@ function Chloex:Window(GuiConfig)
                     end
                 end
 
-                SliderFrame.InputEnded:Connect(FinishSliderDrag)
+                SliderHitbox.InputEnded:Connect(FinishSliderDrag)
                 UserInputService.InputEnded:Connect(FinishSliderDrag)
 
                 UserInputService.InputChanged:Connect(function(Input)
@@ -2932,7 +3191,7 @@ function Chloex:Window(GuiConfig)
                 local function OpenPalette()
                     local Overlay = Instance.new("Frame")
                     Overlay.Size = UDim2.new(1, 0, 1, 0)
-                    Overlay.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+                    Overlay.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
                     Overlay.BackgroundTransparency = 0.35
                     Overlay.ZIndex = 60
                     Overlay.Name = "ColorOverlay"
@@ -2951,7 +3210,7 @@ function Chloex:Window(GuiConfig)
                     local Dialog = Instance.new("Frame")
                     Dialog.Size = UDim2.new(0, 220, 0, dialogHeight)
                     Dialog.Position = UDim2.new(0.5, -110, 0.5, -dialogHeight / 2)
-                    Dialog.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+                    Dialog.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
                     Dialog.BorderSizePixel = 0
                     Dialog.ZIndex = 61
                     Dialog.Parent = Overlay
@@ -3067,7 +3326,7 @@ function Chloex:Window(GuiConfig)
 
                 Input.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 Input.BackgroundTransparency = 0.9350000023841858
-                Input.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                Input.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 Input.BorderSizePixel = 0
                 Input.LayoutOrder = CountItem
                 Input.Size = UDim2.new(1, 0, 0, 46)
@@ -3085,7 +3344,7 @@ function Chloex:Window(GuiConfig)
                 InputTitle.TextYAlignment = Enum.TextYAlignment.Top
                 InputTitle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 InputTitle.BackgroundTransparency = 0.9990000128746033
-                InputTitle.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                InputTitle.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 InputTitle.BorderSizePixel = 0
                 InputTitle.Position = UDim2.new(0, 10, 0, 10)
                 InputTitle.Size = UDim2.new(1, -180, 0, 13)
@@ -3102,7 +3361,7 @@ function Chloex:Window(GuiConfig)
                 InputContent.TextYAlignment = Enum.TextYAlignment.Bottom
                 InputContent.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 InputContent.BackgroundTransparency = 0.9990000128746033
-                InputContent.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                InputContent.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 InputContent.BorderSizePixel = 0
                 InputContent.Position = UDim2.new(0, 10, 0, 25)
                 InputContent.Size = UDim2.new(1, -180, 0, 12)
@@ -3127,7 +3386,7 @@ function Chloex:Window(GuiConfig)
                 InputFrame.AnchorPoint = Vector2.new(1, 0.5)
                 InputFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 InputFrame.BackgroundTransparency = 0.949999988079071
-                InputFrame.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                InputFrame.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 InputFrame.BorderSizePixel = 0
                 InputFrame.ClipsDescendants = true
                 InputFrame.Position = UDim2.new(1, -7, 0.5, 0)
@@ -3150,7 +3409,7 @@ function Chloex:Window(GuiConfig)
                 InputTextBox.AnchorPoint = Vector2.new(0, 0.5)
                 InputTextBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 InputTextBox.BackgroundTransparency = 0.9990000128746033
-                InputTextBox.BorderColor3 = Color3.fromRGB(17, 17, 23)
+                InputTextBox.BorderColor3 = Color3.fromRGB(15, 15, 15)
                 InputTextBox.BorderSizePixel = 0
                 InputTextBox.Position = UDim2.new(0, 5, 0.5, 0)
                 InputTextBox.Size = UDim2.new(1, -10, 1, -8)
@@ -3810,7 +4069,7 @@ function Chloex:Window(GuiConfig)
                 local ratio = BannerConfig.AspectRatio or (16 / 5)
 
                 local Banner = Instance.new("Frame")
-                Banner.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+                Banner.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
                 Banner.BackgroundTransparency = 0.2
                 Banner.BorderSizePixel = 0
                 Banner.ClipsDescendants = true
@@ -3845,9 +4104,9 @@ function Chloex:Window(GuiConfig)
                 else
                     local Grad = Instance.new("UIGradient")
                     Grad.Color = ColorSequence.new {
-                        ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 20)),
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 22, 22)),
                         ColorSequenceKeypoint.new(0.5, GuiConfig.Color),
-                        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 20))
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 22))
                     }
                     Grad.Rotation = 25
                     Grad.Parent = Banner
@@ -3855,7 +4114,7 @@ function Chloex:Window(GuiConfig)
 
                 if BannerConfig.Version then
                     local VerPill = Instance.new("Frame")
-                    VerPill.BackgroundColor3 = Color3.fromRGB(17, 17, 23)
+                    VerPill.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
                     VerPill.BackgroundTransparency = 0.35
                     VerPill.BorderSizePixel = 0
                     VerPill.AnchorPoint = Vector2.new(1, 0)
@@ -3890,6 +4149,129 @@ function Chloex:Window(GuiConfig)
                 return Banner
             end
 
+            function Items:AddCardWidget(CardConfig)
+                CardConfig = CardConfig or {}
+                local asset = tostring(CardConfig.catwidget or CardConfig.CatWidget or CardConfig.Image or CardConfig.Url or "")
+                local ratio = CardConfig.AspectRatio or (1000 / 300)
+
+                local Widget = Instance.new("Frame")
+                Widget.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+                Widget.BackgroundTransparency = 0.2
+                Widget.BorderSizePixel = 0
+                Widget.ClipsDescendants = true
+                Widget.LayoutOrder = CountItem
+                Widget.Size = UDim2.new(1, 0, 0, 110)
+                Widget.Name = "CardWidget"
+                Widget.Parent = SectionAdd
+
+                local WidgetCorner = Instance.new("UICorner")
+                WidgetCorner.CornerRadius = UDim.new(0, 8)
+                WidgetCorner.Parent = Widget
+
+                local function FitHeight()
+                    local w = Widget.AbsoluteSize.X
+                    if w > 0 then
+                        local h = math.floor(w / ratio)
+                        if math.abs(Widget.Size.Y.Offset - h) > 1 then
+                            Widget.Size = UDim2.new(Widget.Size.X.Scale, Widget.Size.X.Offset, 0, h)
+                            UpdateSizeSection()
+                        end
+                    end
+                end
+
+                if asset ~= "" then
+                    local Img = Instance.new("ImageLabel")
+                    Img.BackgroundTransparency = 1
+                    Img.ScaleType = Enum.ScaleType.Fit
+                    Img.Size = UDim2.new(1, 0, 1, 0)
+                    Img.Name = "CardWidgetImage"
+                    Img.Image = ""
+                    Img.Parent = Widget
+
+                    local LoadingLabel = Instance.new("TextLabel")
+                    LoadingLabel.Font = Enum.Font.Gotham
+                    LoadingLabel.Text = "Loading..."
+                    LoadingLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+                    LoadingLabel.TextSize = 12
+                    LoadingLabel.BackgroundTransparency = 1
+                    LoadingLabel.Size = UDim2.new(1, 0, 1, 0)
+                    LoadingLabel.Name = "CardWidgetLoading"
+                    LoadingLabel.Parent = Widget
+
+                    if asset:match("^rbxassetid://") or asset:match("^rbxasset://") or asset:match("^rbxthumb://") or asset:match("^%d+$") then
+                        ApplyIcon(Img, asset, 512)
+                        LoadingLabel:Destroy()
+                    else
+                        task.spawn(function()
+                            local loaded = GetWebImageAsset(asset)
+                            if Img and Img.Parent then
+                                if loaded ~= "" then
+                                    Img.Image = loaded
+                                else
+                                    LoadingLabel.Text = "Failed to load image"
+                                    LoadingLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+                                    return
+                                end
+                            end
+                            if LoadingLabel and LoadingLabel.Parent then
+                                LoadingLabel:Destroy()
+                            end
+                        end)
+                    end
+
+                    if CardConfig.Callback or CardConfig.Link then
+                        local Click = Instance.new("TextButton")
+                        Click.BackgroundTransparency = 1
+                        Click.AutoButtonColor = false
+                        Click.Text = ""
+                        Click.Size = UDim2.new(1, 0, 1, 0)
+                        Click.ZIndex = 5
+                        Click.Name = "ClickArea"
+                        Click.Parent = Widget
+
+                        Click.MouseButton1Click:Connect(function()
+                            if CardConfig.Callback then
+                                pcall(CardConfig.Callback)
+                            end
+                            if CardConfig.Link then
+                                if setclipboard then
+                                    pcall(setclipboard, CardConfig.Link)
+                                    than("Link copied to clipboard", 4, GuiConfig.Color, "BolongHub", "Widget")
+                                end
+                            end
+                        end)
+                    end
+                else
+                    local Grad = Instance.new("UIGradient")
+                    Grad.Color = ColorSequence.new {
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 22, 22)),
+                        ColorSequenceKeypoint.new(0.5, GuiConfig.Color),
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 22))
+                    }
+                    Grad.Rotation = 25
+                    Grad.Parent = Widget
+                end
+
+                Widget:GetPropertyChangedSignal("AbsoluteSize"):Connect(FitHeight)
+                task.spawn(function()
+                    task.wait()
+                    FitHeight()
+                end)
+
+                RegisterSearch({ label = CardConfig.Title or "Card Widget", tab = TabConfig.Name, kind = "CardWidget", switch = SearchSwitch })
+                CountItem = CountItem + 1
+                return Widget
+            end
+
+            function Items:AddCardsWidget(CardsWidget)
+                CardsWidget = CardsWidget or {}
+                local created = {}
+                for _, entry in ipairs(CardsWidget) do
+                    created[#created + 1] = Items:AddCardWidget(entry)
+                end
+                return created
+            end
+
             function Items:AddCard(CardConfig)
                 CardConfig = CardConfig or {}
                 CardConfig.Title = CardConfig.Title or "Card"
@@ -3912,15 +4294,14 @@ function Chloex:Window(GuiConfig)
 
                 local cx = 12
                 if CardConfig.Logo and CardConfig.Logo ~= "" then
-                    local logo = tostring(CardConfig.Logo)
-                    if not string.find(logo, "rbxassetid://") then logo = "rbxassetid://" .. logo end
                     local Logo = Instance.new("ImageLabel")
-                    Logo.Image = logo
                     Logo.BackgroundTransparency = 1
                     Logo.ScaleType = Enum.ScaleType.Fit
                     Logo.Position = UDim2.new(0, 12, 0, 14)
                     Logo.Size = UDim2.new(0, 32, 0, 32)
+                    Logo.Name = "CardLogo"
                     Logo.Parent = Card
+                    ApplyIcon(Logo, CardConfig.Logo, 48)
                     cx = 52
                 end
 
@@ -3943,6 +4324,7 @@ function Chloex:Window(GuiConfig)
                 CardDesc.TextXAlignment = Enum.TextXAlignment.Left
                 CardDesc.TextYAlignment = Enum.TextYAlignment.Top
                 CardDesc.TextWrapped = true
+                CardDesc.RichText = true
                 CardDesc.BackgroundTransparency = 1
                 CardDesc.Position = UDim2.new(0, cx, 0, 30)
                 CardDesc.Size = UDim2.new(1, -cx - 12, 0, 28)
@@ -3993,8 +4375,6 @@ function Chloex:Window(GuiConfig)
                 local Divider = Instance.new("Frame")
                 Divider.Name = "Divider"
                 Divider.Parent = SectionAdd
-                Divider.AnchorPoint = Vector2.new(0.5, 0)
-                Divider.Position = UDim2.new(0.5, 0, 0, 0)
                 Divider.Size = UDim2.new(1, 0, 0, 2)
                 Divider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 Divider.BackgroundTransparency = 0
@@ -4003,9 +4383,9 @@ function Chloex:Window(GuiConfig)
 
                 local UIGradient = Instance.new("UIGradient")
                 UIGradient.Color = ColorSequence.new {
-                    ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 20)),
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 22, 22)),
                     ColorSequenceKeypoint.new(0.5, GuiConfig.Color),
-                    ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 20))
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 22))
                 }
                 UIGradient.Parent = Divider
 
@@ -4097,6 +4477,44 @@ function Chloex:Window(GuiConfig)
                     StackLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateStackHeight)
                 end
 
+                local EqualHeight = StackConfig.EqualHeight
+                if EqualHeight == nil then EqualHeight = true end
+                local heightConnections = {}
+                local syncingHeight = false
+
+                local function RecalculateHeights()
+                    if not EqualHeight or syncingHeight then return end
+                    syncingHeight = true
+
+                    local maxHeight = 0
+                    local contentChildren = {}
+                    for _, child in ipairs(Stack:GetChildren()) do
+                        if child:IsA("GuiObject") and child.Name ~= "Space" then
+                            table.insert(contentChildren, child)
+                            if child.Size.Y.Offset > maxHeight then
+                                maxHeight = child.Size.Y.Offset
+                            end
+                        end
+                    end
+
+                    for _, child in ipairs(contentChildren) do
+                        if child.Size.Y.Offset ~= maxHeight then
+                            child.Size = UDim2.new(child.Size.X.Scale, child.Size.X.Offset, 0, maxHeight)
+                        end
+                    end
+
+                    syncingHeight = false
+                end
+                local heightsPending = false
+                local function ScheduleRecalculateHeights()
+                    if heightsPending then return end
+                    heightsPending = true
+                    task.defer(function()
+                        heightsPending = false
+                        RecalculateHeights()
+                    end)
+                end
+
                 if Sizing == "Equal" then
                     local function RecalculateWidths()
                         local contentChildren, allChildrenCount, spaceOffsetTotal = {}, 0, 0
@@ -4119,17 +4537,42 @@ function Chloex:Window(GuiConfig)
                                 child.Size.Y.Offset)
                         end
                     end
+                    local widthsPending = false
+                    local function ScheduleRecalculateWidths()
+                        if widthsPending then return end
+                        widthsPending = true
+                        task.defer(function()
+                            widthsPending = false
+                            RecalculateWidths()
+                        end)
+                    end
                     Stack.ChildAdded:Connect(function(child)
                         if child:IsA("GuiObject") then
-                            task.defer(RecalculateWidths)
+                            ScheduleRecalculateWidths()
                         end
                     end)
                     Stack.ChildRemoved:Connect(function(child)
                         if child:IsA("GuiObject") then
-                            task.defer(RecalculateWidths)
+                            ScheduleRecalculateWidths()
                         end
                     end)
                 end
+
+                Stack.ChildAdded:Connect(function(child)
+                    if child:IsA("GuiObject") then
+                        heightConnections[child] = child:GetPropertyChangedSignal("Size"):Connect(function()
+                            ScheduleRecalculateHeights()
+                        end)
+                        ScheduleRecalculateHeights()
+                    end
+                end)
+                Stack.ChildRemoved:Connect(function(child)
+                    if heightConnections[child] then
+                        heightConnections[child]:Disconnect()
+                        heightConnections[child] = nil
+                    end
+                    ScheduleRecalculateHeights()
+                end)
 
                 CountItem = CountItem + 1
                 return BuildItemsAPI(Stack)
@@ -4183,46 +4626,55 @@ function Chloex:Window(GuiConfig)
     end
 
     function Tabs:InfoTab(InfoConfig)
-        InfoConfig = InfoConfig or {}
-        local Sections = Tabs:AddTab({
-            Name = InfoConfig.Name or "Info",
-            Icon = InfoConfig.Icon or "idea",
+    InfoConfig = InfoConfig or {}
+    local Sections = Tabs:AddTab({
+        Name = InfoConfig.Name or "Info",
+        Icon = InfoConfig.Icon or "lightbulb",
+    })
+    local Items = Sections:AddSection(InfoConfig.SectionTitle or "Information", true)
+
+    if InfoConfig.Banner and InfoConfig.Banner ~= "" then
+        Items:AddBanner({
+            Image = InfoConfig.Banner,
+            Version = InfoConfig.Version,
+            AspectRatio = InfoConfig.BannerAspectRatio,
         })
-        local Items = Sections:AddSection(InfoConfig.SectionTitle or "Information", true)
-
-        if InfoConfig.Banner and InfoConfig.Banner ~= "" then
-            Items:AddBanner({
-                Image = InfoConfig.Banner,
-                Version = InfoConfig.Version,
-                AspectRatio = InfoConfig.BannerAspectRatio,
-            })
-        end
-
-        if InfoConfig.DiscordLink then
-            Items:AddCard({
-                Title = InfoConfig.DiscordName or "Community",
-                Description = InfoConfig.DiscordText or "Support, updates and announcements.",
-                Logo = Icons.discord,
-                Buttons = {
-                    {
-                        Name = "Copy Invite",
-                        Callback = function()
-                            if setclipboard then
-                                setclipboard(InfoConfig.DiscordLink)
-                                than("Discord invite copied", 4, GuiConfig.Color, "BolongHub", "Community")
-                            end
-                        end,
-                    },
-                },
-            })
-        end
-
-        for _, card in ipairs(InfoConfig.Cards or {}) do
-            Items:AddCard(card)
-        end
-
-        return Sections, Items
     end
+
+    if InfoConfig.DiscordLink then
+        local fullDescription = InfoConfig.DiscordText or "Support, updates and announcements."
+        if InfoConfig.DiscordDesc and InfoConfig.DiscordDesc ~= "" then
+            fullDescription = fullDescription .. "\n" .. InfoConfig.DiscordDesc
+        end
+        
+        Items:AddCard({
+            Title = InfoConfig.DiscordName or "Community",
+            Description = fullDescription,
+            Logo = discord_logo_asset_id,
+            Buttons = {
+                {
+                    Name = "Copy Invite",
+                    Callback = function()
+                        if setclipboard then
+                            setclipboard(InfoConfig.DiscordLink)
+                            than("Discord invite copied", 4, GuiConfig.Color, "BolongHub", "Community")
+                        end
+                    end,
+                },
+            },
+        })
+    end
+
+    for _, card in ipairs(InfoConfig.Cards or {}) do
+        Items:AddCard(card)
+    end
+
+    for _, widget in ipairs(InfoConfig.CardsWidget or {}) do
+        Items:AddCardWidget(widget)
+    end
+
+    return Sections, Items
+  end
 
     GuiFunc.InfoTab = function(_, cfg) return Tabs:InfoTab(cfg) end
     Tabs.Window = GuiFunc

@@ -11,31 +11,9 @@ local gameName   = tostring(game:GetService("MarketplaceService"):GetProductInfo
 gameName         = gameName:gsub("[^%w_ ]", "")
 gameName         = gameName:gsub("%s+", "_")
 
-local function SanitizeConfigName(name)
-    name = tostring(name or "")
-    name = name:gsub("[^%w_ ]", "")
-    name = name:gsub("%s+", "_")
-    return name
-end
-
-local function EnsureFolderForFile(path)
-    local parts = {}
-    for part in string.gmatch(path, "[^/\\]+") do
-        table.insert(parts, part)
-    end
-    table.remove(parts)
-    local current = ""
-    for _, part in ipairs(parts) do
-        current = (current == "" and part) or (current .. "/" .. part)
-        if not isfolder(current) then
-            makefolder(current)
-        end
-    end
-end
-
-ConfigFile = "BolongHub/Config/" .. gameName .. ".json"
-ConfigFolder = "BolongHub/Configs"
-GameConfigFolder = ConfigFolder .. "/" .. gameName
+local ConfigFile = "BolongHub/Config/" .. gameName .. ".json"
+local ConfigFolder = "BolongHub/Configs"
+local GameConfigFolder = ConfigFolder .. "/" .. gameName
 
 ConfigData       = {}
 Elements         = {}
@@ -774,353 +752,6 @@ function than(msg, delay, color, title, desc)
     })
 end
 
--- ==============================
--- Key System (menyatu dengan Chloex:Window lewat field `KeySystem`)
--- ==============================
--- local Window = Chloex:Window({
---     Title   = "BOLONG-HUB",
---     Image   = "84034353458936",
---     Footer  = "Violence District",
---     Author  = "Discord.gg/pWpgqVGxNK",
---     Color   = ACCENT_COLOR,
---     Version = 1,
---     Search  = true,
---     Folder  = "MyScriptName",  -- (opsional) nama unik config folder script ini.
---                                 -- Kalau kosong, default-nya pakai nama game (bisa tabrakan
---                                 -- kalau kamu punya beberapa script buat game yang sama).
---     KeySystem = {
---         Title      = "BolongHub",
---         Note       = "Masukkan key kamu di bawah ini untuk melanjutkan.",
---         Keys       = {"KEY-1234", "KEY-5678"},   -- daftar key statis (opsional)
---         Validate   = function(key) return true end, -- validator custom, mis. panggil API sendiri (opsional)
---         GetKeyLink = "https://link-kamu.com",     -- link yang di-copy saat tombol "Get Key" ditekan
---         SaveKey    = true,                        -- simpan key yang valid supaya tidak perlu input ulang
---         FileName   = "BolongHub/Config/key.txt",  -- (opsional) kalau dikosongkan/tidak diisi,
---                                                    -- otomatis jadi "BolongHub/Config/<Folder>_key.txt"
---                                                    -- sehingga key antar-script tidak tabrakan
---                                                    -- walau berada di folder/game yang sama.
---         OnFail     = function(key) end,            -- dipanggil tiap kali percobaan key gagal
---     },
--- })
-local function RunKeySystemGate(KeyConfig, AccentColor, ScopeName)
-    KeyConfig          = KeyConfig or {}
-    KeyConfig.Title    = KeyConfig.Title or "BolongHub"
-    KeyConfig.Note     = KeyConfig.Note or "Masukkan key kamu di bawah ini untuk melanjutkan."
-    KeyConfig.SaveKey  = (KeyConfig.SaveKey ~= false)
-    if not KeyConfig.FileName or KeyConfig.FileName == "" then
-        local scope = SanitizeConfigName(ScopeName)
-        if scope ~= "" then
-            KeyConfig.FileName = "BolongHub/Config/" .. scope .. "_key.txt"
-        else
-            KeyConfig.FileName = "BolongHub/Config/key.txt"
-        end
-    end
-    AccentColor        = KeyConfig.Color or AccentColor or Color3.fromRGB(240, 240, 240)
-
-    local function Trim(s)
-        return (tostring(s or ""):gsub("^%s*(.-)%s*$", "%1"))
-    end
-
-    local function IsValidKey(key)
-        if key == "" then return false end
-        if type(KeyConfig.Validate) == "function" then
-            local ok, result = pcall(KeyConfig.Validate, key)
-            return ok and result == true
-        end
-        if type(KeyConfig.Keys) == "table" then
-            for _, k in ipairs(KeyConfig.Keys) do
-                if tostring(k) == key then return true end
-            end
-        end
-        return false
-    end
-
-    local function SaveValidKey(key)
-        if not KeyConfig.SaveKey then return end
-        local ok = pcall(function()
-            EnsureFolderForFile(KeyConfig.FileName)
-            writefile(KeyConfig.FileName, key)
-        end)
-        if not ok then
-            warn("[BolongUi] Gagal menyimpan key ke " .. tostring(KeyConfig.FileName))
-        end
-    end
-
-    if KeyConfig.SaveKey and isfile and isfile(KeyConfig.FileName) then
-        local ok, saved = pcall(readfile, KeyConfig.FileName)
-        if ok and IsValidKey(Trim(saved)) then
-            return true
-        end
-    end
-
-    local BKey = Instance.new("ScreenGui")
-    BKey.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    BKey.Name = "BKeySystem"
-    BKey.ResetOnSpawn = false
-    BKey.Parent = CoreGui
-
-    local CardSize = isMobile and safeSize(272, 178) or safeSize(300, 178)
-
-    local ShadowHolder = Instance.new("Frame")
-    ShadowHolder.BackgroundTransparency = 1
-    ShadowHolder.BorderSizePixel = 0
-    ShadowHolder.AnchorPoint = Vector2.new(0.5, 0.5)
-    ShadowHolder.Position = UDim2.new(0.5, 0, 0.5, 0)
-    ShadowHolder.Size = CardSize
-    ShadowHolder.Name = "ShadowHolder"
-    ShadowHolder.Parent = BKey
-
-    local Shadow = Instance.new("ImageLabel")
-    Shadow.Image = "rbxassetid://6015897843"
-    Shadow.ImageColor3 = Color3.fromRGB(10, 10, 10)
-    Shadow.ImageTransparency = 0.25
-    Shadow.ScaleType = Enum.ScaleType.Slice
-    Shadow.SliceCenter = Rect.new(49, 49, 450, 450)
-    Shadow.AnchorPoint = Vector2.new(0.5, 0.5)
-    Shadow.BackgroundTransparency = 1
-    Shadow.BorderSizePixel = 0
-    Shadow.Position = UDim2.new(0.5, 0, 0.5, 0)
-    Shadow.Size = UDim2.new(1, 40, 1, 40)
-    Shadow.Name = "Shadow"
-    Shadow.Parent = ShadowHolder
-
-    local KeyMain = Instance.new("Frame")
-    KeyMain.BackgroundColor3 = Color3.fromRGB(16, 16, 16)
-    KeyMain.BorderSizePixel = 0
-    KeyMain.ClipsDescendants = true
-    KeyMain.AnchorPoint = Vector2.new(0.5, 0.5)
-    KeyMain.Position = UDim2.new(0.5, 0, 0.5, 0)
-    KeyMain.Size = UDim2.new(1, 0, 1, 0)
-    KeyMain.Name = "KeyMain"
-    KeyMain.Parent = Shadow
-
-    local KeyMainCorner = Instance.new("UICorner")
-    KeyMainCorner.CornerRadius = UDim.new(0, 10)
-    KeyMainCorner.Parent = KeyMain
-
-    local KeyTop = Instance.new("Frame")
-    KeyTop.BackgroundTransparency = 1
-    KeyTop.BorderSizePixel = 0
-    KeyTop.Position = UDim2.new(0, 0, 0, 0)
-    KeyTop.Size = UDim2.new(1, 0, 0, 34)
-    KeyTop.Name = "Top"
-    KeyTop.Parent = KeyMain
-
-    local KeyIconHolder = Instance.new("Frame")
-    KeyIconHolder.BackgroundColor3 = AccentColor
-    KeyIconHolder.BackgroundTransparency = 0.85
-    KeyIconHolder.BorderSizePixel = 0
-    KeyIconHolder.AnchorPoint = Vector2.new(0, 0.5)
-    KeyIconHolder.Position = UDim2.new(0, 10, 0.5, 0)
-    KeyIconHolder.Size = UDim2.new(0, 20, 0, 20)
-    KeyIconHolder.Name = "IconHolder"
-    KeyIconHolder.Parent = KeyTop
-
-    local KeyIconHolderCorner = Instance.new("UICorner")
-    KeyIconHolderCorner.CornerRadius = UDim.new(0, 6)
-    KeyIconHolderCorner.Parent = KeyIconHolder
-
-    local KeyIcon = Instance.new("ImageLabel")
-    KeyIcon.BackgroundTransparency = 1
-    KeyIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-    KeyIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-    KeyIcon.Size = UDim2.new(1, -6, 1, -6)
-    KeyIcon.ImageColor3 = AccentColor
-    KeyIcon.Name = "Icon"
-    KeyIcon.Parent = KeyIconHolder
-    ApplyIcon(KeyIcon, "key-round", 64)
-
-    local KeyTitle = Instance.new("TextLabel")
-    KeyTitle.Font = Enum.Font.GothamBold
-    KeyTitle.Text = KeyConfig.Title
-    KeyTitle.TextColor3 = Color3.fromRGB(240, 240, 240)
-    KeyTitle.TextSize = 13
-    KeyTitle.TextXAlignment = Enum.TextXAlignment.Left
-    KeyTitle.TextYAlignment = Enum.TextYAlignment.Center
-    KeyTitle.BackgroundTransparency = 1
-    KeyTitle.AnchorPoint = Vector2.new(0, 0.5)
-    KeyTitle.Position = UDim2.new(0, 38, 0.5, 0)
-    KeyTitle.Size = UDim2.new(1, -74, 1, 0)
-    KeyTitle.Name = "Title"
-    KeyTitle.Parent = KeyTop
-
-    local KeyClose = Instance.new("TextButton")
-    KeyClose.Font = Enum.Font.SourceSans
-    KeyClose.Text = ""
-    KeyClose.AutoButtonColor = false
-    KeyClose.BackgroundTransparency = 1
-    KeyClose.BorderSizePixel = 0
-    KeyClose.AnchorPoint = Vector2.new(1, 0.5)
-    KeyClose.Position = UDim2.new(1, -8, 0.5, 0)
-    KeyClose.Size = UDim2.new(0, 22, 0, 22)
-    KeyClose.Name = "Close"
-    KeyClose.Parent = KeyTop
-
-    local KeyCloseIcon = Instance.new("ImageLabel")
-    KeyCloseIcon.Image = "rbxassetid://9886659671"
-    KeyCloseIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
-    KeyCloseIcon.ImageTransparency = 0.25
-    KeyCloseIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-    KeyCloseIcon.BackgroundTransparency = 1
-    KeyCloseIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-    KeyCloseIcon.Size = UDim2.new(1, -8, 1, -8)
-    KeyCloseIcon.Parent = KeyClose
-
-    local closedByUser = false
-    KeyClose.Activated:Connect(function()
-        closedByUser = true
-        BKey:Destroy()
-    end)
-
-    MakeDraggable(KeyTop, ShadowHolder)
-    local KeyNote = Instance.new("TextLabel")
-    KeyNote.Font = Enum.Font.Gotham
-    KeyNote.Text = KeyConfig.Note
-    KeyNote.TextColor3 = Color3.fromRGB(165, 165, 165)
-    KeyNote.TextSize = 12
-    KeyNote.TextWrapped = true
-    KeyNote.TextXAlignment = Enum.TextXAlignment.Left
-    KeyNote.TextYAlignment = Enum.TextYAlignment.Top
-    KeyNote.BackgroundTransparency = 1
-    KeyNote.Position = UDim2.new(0, 12, 0, 40)
-    KeyNote.Size = UDim2.new(1, -24, 0, 32)
-    KeyNote.Name = "Note"
-    KeyNote.Parent = KeyMain
-
-    local InputHolder = Instance.new("Frame")
-    InputHolder.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
-    InputHolder.BorderSizePixel = 0
-    InputHolder.Position = UDim2.new(0, 12, 0, 78)
-    InputHolder.Size = UDim2.new(1, -24, 0, 32)
-    InputHolder.Name = "InputHolder"
-    InputHolder.Parent = KeyMain
-
-    local InputHolderCorner = Instance.new("UICorner")
-    InputHolderCorner.CornerRadius = UDim.new(0, 6)
-    InputHolderCorner.Parent = InputHolder
-
-    local InputStroke = Instance.new("UIStroke")
-    InputStroke.Color = Color3.fromRGB(45, 45, 45)
-    InputStroke.Thickness = 1
-    InputStroke.Parent = InputHolder
-
-    local KeyInput = Instance.new("TextBox")
-    KeyInput.Font = Enum.Font.Gotham
-    KeyInput.PlaceholderText = "Masukkan key..."
-    KeyInput.PlaceholderColor3 = Color3.fromRGB(110, 110, 110)
-    KeyInput.Text = ""
-    KeyInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-    KeyInput.TextSize = 12
-    KeyInput.ClearTextOnFocus = false
-    KeyInput.TextXAlignment = Enum.TextXAlignment.Left
-    KeyInput.BackgroundTransparency = 1
-    KeyInput.Position = UDim2.new(0, 10, 0, 0)
-    KeyInput.Size = UDim2.new(1, -20, 1, 0)
-    KeyInput.Name = "KeyInput"
-    KeyInput.Parent = InputHolder
-
-    local GetKeyBtn = Instance.new("TextButton")
-    GetKeyBtn.Font = Enum.Font.GothamBold
-    GetKeyBtn.Text = "Get Key"
-    GetKeyBtn.TextColor3 = Color3.fromRGB(230, 230, 230)
-    GetKeyBtn.TextSize = 12
-    GetKeyBtn.AutoButtonColor = false
-    GetKeyBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
-    GetKeyBtn.BorderSizePixel = 0
-    GetKeyBtn.Position = UDim2.new(0, 12, 0, 118)
-    GetKeyBtn.Size = UDim2.new(0.5, -16, 0, 30)
-    GetKeyBtn.Name = "GetKeyBtn"
-    GetKeyBtn.Parent = KeyMain
-
-    local GetKeyBtnCorner = Instance.new("UICorner")
-    GetKeyBtnCorner.CornerRadius = UDim.new(0, 6)
-    GetKeyBtnCorner.Parent = GetKeyBtn
-
-    local SubmitBtn = Instance.new("TextButton")
-    SubmitBtn.Font = Enum.Font.GothamBold
-    SubmitBtn.Text = "Verify"
-    SubmitBtn.TextColor3 = Color3.fromRGB(15, 15, 15)
-    SubmitBtn.TextSize = 12
-    SubmitBtn.AutoButtonColor = false
-    SubmitBtn.BackgroundColor3 = AccentColor
-    SubmitBtn.BorderSizePixel = 0
-    SubmitBtn.Position = UDim2.new(0.5, 4, 0, 118)
-    SubmitBtn.Size = UDim2.new(0.5, -16, 0, 30)
-    SubmitBtn.Name = "SubmitBtn"
-    SubmitBtn.Parent = KeyMain
-
-    local SubmitBtnCorner = Instance.new("UICorner")
-    SubmitBtnCorner.CornerRadius = UDim.new(0, 6)
-    SubmitBtnCorner.Parent = SubmitBtn
-
-    GetKeyBtn.MouseEnter:Connect(function()
-        TweenService:Create(GetKeyBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(38, 38, 38) }):Play()
-    end)
-    GetKeyBtn.MouseLeave:Connect(function()
-        TweenService:Create(GetKeyBtn, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(28, 28, 28) }):Play()
-    end)
-
-    GetKeyBtn.Activated:Connect(function()
-        if KeyConfig.GetKeyLink and KeyConfig.GetKeyLink ~= "" then
-            if setclipboard then
-                setclipboard(KeyConfig.GetKeyLink)
-                than("Link disalin ke clipboard, buka di browser untuk mendapatkan key.", 5, AccentColor,
-                    KeyConfig.Title, "Key System")
-            else
-                than("Executor kamu tidak mendukung setclipboard.", 4, Color3.fromRGB(255, 90, 90), KeyConfig.Title,
-                    "Key System")
-            end
-        else
-            than("Belum ada link key yang diatur.", 4, Color3.fromRGB(255, 90, 90), KeyConfig.Title, "Key System")
-        end
-    end)
-
-    local resolved, checking = false, false
-    local function AttemptSubmit()
-        if checking then return end
-        local key = Trim(KeyInput.Text)
-        if key == "" then
-            than("Masukkan key terlebih dahulu.", 3, Color3.fromRGB(255, 170, 0), KeyConfig.Title, "Key System")
-            return
-        end
-
-        checking = true
-        SubmitBtn.Text = "..."
-        local valid = IsValidKey(key)
-        checking = false
-        SubmitBtn.Text = "Verify"
-
-        if valid then
-            than("Key valid, selamat datang!", 4, AccentColor, KeyConfig.Title, "Key System")
-            SaveValidKey(key)
-            resolved = true
-            BKey:Destroy()
-        else
-            than("Key salah atau sudah tidak berlaku.", 4, Color3.fromRGB(255, 90, 90), KeyConfig.Title, "Key System")
-            if type(KeyConfig.OnFail) == "function" then
-                pcall(KeyConfig.OnFail, key)
-            end
-        end
-    end
-
-    SubmitBtn.Activated:Connect(AttemptSubmit)
-    KeyInput.FocusLost:Connect(function(enterPressed)
-        if enterPressed then AttemptSubmit() end
-    end)
-
-    KeyMain.BackgroundTransparency = 1
-    ShadowHolder.Size = UDim2.new(CardSize.X.Scale, CardSize.X.Offset * 0.94, CardSize.Y.Scale, CardSize.Y.Offset * 0.94)
-    TweenService:Create(ShadowHolder, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { Size = CardSize }):Play()
-    TweenService:Create(KeyMain, TweenInfo.new(0.18), { BackgroundTransparency = 0 }):Play()
-
-    repeat
-        task.wait()
-    until resolved or closedByUser
-
-    return resolved
-end
-
 function Chloex:Window(GuiConfig)
     GuiConfig              = GuiConfig or {}
     GuiConfig.Title        = GuiConfig.Title or "BolongHub"
@@ -1131,20 +762,6 @@ function Chloex:Window(GuiConfig)
     GuiConfig["Tab Width"] = GuiConfig["Tab Width"] or 120
     GuiConfig.Version      = GuiConfig.Version or 1
     if GuiConfig.Search == nil then GuiConfig.Search = true end
-
-    local FolderScope = SanitizeConfigName(GuiConfig.Folder)
-    if FolderScope == "" then FolderScope = gameName end
-    GuiConfig.Folder = FolderScope
-
-    ConfigFile        = "BolongHub/Config/" .. FolderScope .. ".json"
-    GameConfigFolder  = ConfigFolder .. "/" .. FolderScope
-
-    if GuiConfig.KeySystem then
-        local passed = RunKeySystemGate(GuiConfig.KeySystem, GuiConfig.Color, GuiConfig.Folder)
-        if not passed then
-            return nil
-        end
-    end
 
     CURRENT_VERSION        = GuiConfig.Version
     LoadConfigFromFile()
@@ -1267,6 +884,9 @@ function Chloex:Window(GuiConfig)
         than("Config imported", 4, GuiConfig.Color, "BolongHub", "Import")
         return true
     end
+
+    local ConfigFolder = "BolongHub/Configs"
+    local GameConfigFolder = ConfigFolder .. "/" .. gameName
 
     local function EnsureConfigFolder()
         if not isfolder("BolongHub") then makefolder("BolongHub") end
@@ -3570,11 +3190,6 @@ function Chloex:Window(GuiConfig)
                 end
 
                 local function OpenPalette()
-                    local editH, editS, editV = ColorFunc.Value:ToHSV()
-                    local editColor = ColorFunc.Value
-                    local svDragging, hueDragging = false, false
-                    local Connections = {}
-
                     local Overlay = Instance.new("Frame")
                     Overlay.Size = UDim2.new(1, 0, 1, 0)
                     Overlay.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
@@ -3590,11 +3205,12 @@ function Chloex:Window(GuiConfig)
                     OverlayClose.ZIndex = 60
                     OverlayClose.Parent = Overlay
 
-                    local dialogWidth, dialogHeight = 300, 340
+                    local cols, rows = 5, math.ceil(#ColorConfig.Colors / 5)
+                    local dialogHeight = 56 + (rows * 38)
 
                     local Dialog = Instance.new("Frame")
-                    Dialog.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
-                    Dialog.Position = UDim2.new(0.5, -dialogWidth / 2, 0.5, -dialogHeight / 2)
+                    Dialog.Size = UDim2.new(0, 220, 0, dialogHeight)
+                    Dialog.Position = UDim2.new(0.5, -110, 0.5, -dialogHeight / 2)
                     Dialog.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
                     Dialog.BorderSizePixel = 0
                     Dialog.ZIndex = 61
@@ -3611,382 +3227,59 @@ function Chloex:Window(GuiConfig)
 
                     local DialogTitle = Instance.new("TextLabel")
                     DialogTitle.Font = Enum.Font.GothamBold
-                    DialogTitle.Text = ColorConfig.Title
+                    DialogTitle.Text = "Pilih Warna"
                     DialogTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    DialogTitle.TextSize = 15
-                    DialogTitle.TextXAlignment = Enum.TextXAlignment.Left
+                    DialogTitle.TextSize = 13
                     DialogTitle.BackgroundTransparency = 1
-                    DialogTitle.Position = UDim2.new(0, 14, 0, 12)
-                    DialogTitle.Size = UDim2.new(1, -28, 0, 20)
-                    DialogTitle.ZIndex = 62
+                    DialogTitle.Position = UDim2.new(0, 0, 0, 8)
+                    DialogTitle.Size = UDim2.new(1, 0, 0, 18)
+                    DialogTitle.ZIndex = 61
                     DialogTitle.Parent = Dialog
 
-                    local SVBox = Instance.new("Frame")
-                    SVBox.Name = "SVBox"
-                    SVBox.BackgroundColor3 = Color3.fromHSV(editH, 1, 1)
-                    SVBox.BorderSizePixel = 0
-                    SVBox.Position = UDim2.new(0, 14, 0, 40)
-                    SVBox.Size = UDim2.new(0, 200, 0, 150)
-                    SVBox.ZIndex = 62
-                    SVBox.Parent = Dialog
+                    local Grid = Instance.new("Frame")
+                    Grid.BackgroundTransparency = 1
+                    Grid.Position = UDim2.new(0, 10, 0, 32)
+                    Grid.Size = UDim2.new(1, -20, 1, -40)
+                    Grid.ZIndex = 61
+                    Grid.Parent = Dialog
 
-                    local SVBoxCorner = Instance.new("UICorner")
-                    SVBoxCorner.CornerRadius = UDim.new(0, 8)
-                    SVBoxCorner.Parent = SVBox
-
-                    local SVWhiteOverlay = Instance.new("Frame")
-                    SVWhiteOverlay.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                    SVWhiteOverlay.BorderSizePixel = 0
-                    SVWhiteOverlay.Size = UDim2.new(1, 0, 1, 0)
-                    SVWhiteOverlay.ZIndex = 62
-                    SVWhiteOverlay.Parent = SVBox
-
-                    local SVWhiteCorner = Instance.new("UICorner")
-                    SVWhiteCorner.CornerRadius = UDim.new(0, 8)
-                    SVWhiteCorner.Parent = SVWhiteOverlay
-
-                    local SVWhiteGradient = Instance.new("UIGradient")
-                    SVWhiteGradient.Transparency = NumberSequence.new({
-                        NumberSequenceKeypoint.new(0, 0),
-                        NumberSequenceKeypoint.new(1, 1),
-                    })
-                    SVWhiteGradient.Parent = SVWhiteOverlay
-
-                    local SVBlackOverlay = Instance.new("Frame")
-                    SVBlackOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-                    SVBlackOverlay.BorderSizePixel = 0
-                    SVBlackOverlay.Size = UDim2.new(1, 0, 1, 0)
-                    SVBlackOverlay.ZIndex = 62
-                    SVBlackOverlay.Parent = SVBox
-
-                    local SVBlackCorner = Instance.new("UICorner")
-                    SVBlackCorner.CornerRadius = UDim.new(0, 8)
-                    SVBlackCorner.Parent = SVBlackOverlay
-
-                    local SVBlackGradient = Instance.new("UIGradient")
-                    SVBlackGradient.Rotation = 90
-                    SVBlackGradient.Transparency = NumberSequence.new({
-                        NumberSequenceKeypoint.new(0, 1),
-                        NumberSequenceKeypoint.new(1, 0),
-                    })
-                    SVBlackGradient.Parent = SVBlackOverlay
-
-                    local SVCursor = Instance.new("Frame")
-                    SVCursor.AnchorPoint = Vector2.new(0.5, 0.5)
-                    SVCursor.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                    SVCursor.BorderSizePixel = 0
-                    SVCursor.Size = UDim2.new(0, 16, 0, 16)
-                    SVCursor.ZIndex = 63
-                    SVCursor.Parent = SVBox
-
-                    local SVCursorCorner = Instance.new("UICorner")
-                    SVCursorCorner.CornerRadius = UDim.new(1, 0)
-                    SVCursorCorner.Parent = SVCursor
-
-                    local SVCursorStroke = Instance.new("UIStroke")
-                    SVCursorStroke.Color = GuiConfig.Color
-                    SVCursorStroke.Thickness = 2
-                    SVCursorStroke.Parent = SVCursor
-
-                    local SVHitbox = Instance.new("TextButton")
-                    SVHitbox.Text = ""
-                    SVHitbox.BackgroundTransparency = 1
-                    SVHitbox.Size = UDim2.new(1, 0, 1, 0)
-                    SVHitbox.ZIndex = 64
-                    SVHitbox.Parent = SVBox
-
-                    -- Slider Hue
-                    local HueSlider = Instance.new("Frame")
-                    HueSlider.Name = "HueSlider"
-                    HueSlider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                    HueSlider.BorderSizePixel = 0
-                    HueSlider.Position = UDim2.new(0, 224, 0, 40)
-                    HueSlider.Size = UDim2.new(0, 20, 0, 150)
-                    HueSlider.ZIndex = 62
-                    HueSlider.Parent = Dialog
-
-                    local HueCorner = Instance.new("UICorner")
-                    HueCorner.CornerRadius = UDim.new(0, 10)
-                    HueCorner.Parent = HueSlider
-
-                    local HueGradient = Instance.new("UIGradient")
-                    HueGradient.Rotation = 90
-                    HueGradient.Color = ColorSequence.new({
-                        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
-                        ColorSequenceKeypoint.new(1 / 6, Color3.fromRGB(255, 255, 0)),
-                        ColorSequenceKeypoint.new(2 / 6, Color3.fromRGB(0, 255, 0)),
-                        ColorSequenceKeypoint.new(3 / 6, Color3.fromRGB(0, 255, 255)),
-                        ColorSequenceKeypoint.new(4 / 6, Color3.fromRGB(0, 0, 255)),
-                        ColorSequenceKeypoint.new(5 / 6, Color3.fromRGB(255, 0, 255)),
-                        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
-                    })
-                    HueGradient.Parent = HueSlider
-
-                    local HueCursor = Instance.new("Frame")
-                    HueCursor.AnchorPoint = Vector2.new(0.5, 0.5)
-                    HueCursor.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                    HueCursor.BorderSizePixel = 0
-                    HueCursor.Position = UDim2.new(0.5, 0, 0, 0)
-                    HueCursor.Size = UDim2.new(0, 26, 0, 10)
-                    HueCursor.ZIndex = 63
-                    HueCursor.Parent = HueSlider
-
-                    local HueCursorCorner = Instance.new("UICorner")
-                    HueCursorCorner.CornerRadius = UDim.new(1, 0)
-                    HueCursorCorner.Parent = HueCursor
-
-                    local HueCursorStroke = Instance.new("UIStroke")
-                    HueCursorStroke.Color = Color3.fromRGB(20, 20, 20)
-                    HueCursorStroke.Thickness = 2
-                    HueCursorStroke.Parent = HueCursor
-
-                    local HueHitbox = Instance.new("TextButton")
-                    HueHitbox.Text = ""
-                    HueHitbox.BackgroundTransparency = 1
-                    HueHitbox.Size = UDim2.new(1, 0, 1, 0)
-                    HueHitbox.ZIndex = 64
-                    HueHitbox.Parent = HueSlider
-
-                    local function CreateField(posX, posY, width, labelText)
-                        local Field = Instance.new("Frame")
-                        Field.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                        Field.BackgroundTransparency = 0.935
-                        Field.BorderSizePixel = 0
-                        Field.Position = UDim2.new(0, posX, 0, posY)
-                        Field.Size = UDim2.new(0, width, 0, 30)
-                        Field.ZIndex = 62
-                        Field.Parent = Dialog
-
-                        local FieldCorner = Instance.new("UICorner")
-                        FieldCorner.CornerRadius = UDim.new(0, 6)
-                        FieldCorner.Parent = Field
-
-                        local ValueBox = Instance.new("TextBox")
-                        ValueBox.Font = Enum.Font.GothamBold
-                        ValueBox.Text = ""
-                        ValueBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-                        ValueBox.TextSize = 13
-                        ValueBox.TextXAlignment = Enum.TextXAlignment.Left
-                        ValueBox.ClearTextOnFocus = false
-                        ValueBox.BackgroundTransparency = 1
-                        ValueBox.Position = UDim2.new(0, 12, 0, 0)
-                        ValueBox.Size = UDim2.new(0.5, -12, 1, 0)
-                        ValueBox.ZIndex = 63
-                        ValueBox.Parent = Field
-
-                        local Label = Instance.new("TextLabel")
-                        Label.Font = Enum.Font.GothamBold
-                        Label.Text = labelText
-                        Label.TextColor3 = Color3.fromRGB(255, 255, 255)
-                        Label.TextTransparency = 0.55
-                        Label.TextSize = 12
-                        Label.TextXAlignment = Enum.TextXAlignment.Right
-                        Label.BackgroundTransparency = 1
-                        Label.Position = UDim2.new(0.5, 0, 0, 0)
-                        Label.Size = UDim2.new(0.5, -12, 1, 0)
-                        Label.ZIndex = 63
-                        Label.Parent = Field
-
-                        return ValueBox
-                    end
-
-                    local PreviewSwatch = Instance.new("Frame")
-                    PreviewSwatch.BackgroundColor3 = editColor
-                    PreviewSwatch.BorderSizePixel = 0
-                    PreviewSwatch.Position = UDim2.new(0, 14, 0, 204)
-                    PreviewSwatch.Size = UDim2.new(0, 30, 0, 30)
-                    PreviewSwatch.ZIndex = 62
-                    PreviewSwatch.Parent = Dialog
-
-                    local PreviewCorner = Instance.new("UICorner")
-                    PreviewCorner.CornerRadius = UDim.new(0, 6)
-                    PreviewCorner.Parent = PreviewSwatch
-
-                    local PreviewStroke = Instance.new("UIStroke")
-                    PreviewStroke.Color = Color3.fromRGB(255, 255, 255)
-                    PreviewStroke.Transparency = 0.7
-                    PreviewStroke.Parent = PreviewSwatch
-
-                    local HexBox = CreateField(52, 204, 234, "Hex")
-                    local RBox = CreateField(14, 242, 85, "Red")
-                    local GBox = CreateField(107, 242, 85, "Green")
-                    local BBox = CreateField(200, 242, 85, "Blue")
-
-                    local CancelButton = Instance.new("TextButton")
-                    CancelButton.Font = Enum.Font.GothamBold
-                    CancelButton.Text = "Cancel"
-                    CancelButton.TextColor3 = Color3.fromRGB(235, 235, 235)
-                    CancelButton.TextSize = 15
-                    CancelButton.AutoButtonColor = false
-                    CancelButton.BackgroundColor3 = Color3.fromRGB(40, 40, 44)
-                    CancelButton.BorderSizePixel = 0
-                    CancelButton.Position = UDim2.new(0, 14, 0, 284)
-                    CancelButton.Size = UDim2.new(0, 132, 0, 44)
-                    CancelButton.ZIndex = 62
-                    CancelButton.Parent = Dialog
-
-                    local CancelCorner = Instance.new("UICorner")
-                    CancelCorner.CornerRadius = UDim.new(1, 0)
-                    CancelCorner.Parent = CancelButton
-
-                    local CancelStroke = Instance.new("UIStroke")
-                    CancelStroke.Color = Color3.fromRGB(255, 255, 255)
-                    CancelStroke.Transparency = 0.88
-                    CancelStroke.Parent = CancelButton
-
-                    CancelButton.MouseEnter:Connect(function()
-                        TweenService:Create(CancelButton, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(52, 52, 57) }):Play()
-                    end)
-                    CancelButton.MouseLeave:Connect(function()
-                        TweenService:Create(CancelButton, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(40, 40, 44) }):Play()
-                    end)
-
-                    local accent = GuiConfig.Color
-                    local function ClampChannel(v) return math.clamp(v, 0, 1) end
-                    local ApplyFill = Color3.new(
-                        ClampChannel(accent.R * 0.45 + 0.05),
-                        ClampChannel(accent.G * 0.45 + 0.05),
-                        ClampChannel(accent.B * 0.45 + 0.05)
-                    )
-                    local ApplyFillHover = Color3.new(
-                        ClampChannel(accent.R * 0.55 + 0.1),
-                        ClampChannel(accent.G * 0.55 + 0.1),
-                        ClampChannel(accent.B * 0.55 + 0.1)
-                    )
-
-                    local ApplyButton = Instance.new("TextButton")
-                    ApplyButton.Font = Enum.Font.GothamBold
-                    ApplyButton.Text = "Apply"
-                    ApplyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    ApplyButton.TextSize = 15
-                    ApplyButton.AutoButtonColor = false
-                    ApplyButton.BackgroundColor3 = ApplyFill
-                    ApplyButton.BorderSizePixel = 0
-                    ApplyButton.Position = UDim2.new(0, 154, 0, 284)
-                    ApplyButton.Size = UDim2.new(0, 132, 0, 44)
-                    ApplyButton.ZIndex = 62
-                    ApplyButton.Parent = Dialog
-
-                    local ApplyCorner = Instance.new("UICorner")
-                    ApplyCorner.CornerRadius = UDim.new(1, 0)
-                    ApplyCorner.Parent = ApplyButton
-
-                    ApplyButton.MouseEnter:Connect(function()
-                        TweenService:Create(ApplyButton, TweenInfo.new(0.15), { BackgroundColor3 = ApplyFillHover }):Play()
-                    end)
-                    ApplyButton.MouseLeave:Connect(function()
-                        TweenService:Create(ApplyButton, TweenInfo.new(0.15), { BackgroundColor3 = ApplyFill }):Play()
-                    end)
-
-
-                    local updatingFields = false
-
-                    local function RefreshUI(skipFields)
-                        editColor = Color3.fromHSV(editH, editS, editV)
-                        SVBox.BackgroundColor3 = Color3.fromHSV(editH, 1, 1)
-                        SVCursor.Position = UDim2.new(editS, 0, 1 - editV, 0)
-                        HueCursor.Position = UDim2.new(0.5, 0, editH, 0)
-                        PreviewSwatch.BackgroundColor3 = editColor
-
-                        if not skipFields then
-                            local r = math.floor(editColor.R * 255 + 0.5)
-                            local g = math.floor(editColor.G * 255 + 0.5)
-                            local b = math.floor(editColor.B * 255 + 0.5)
-                            updatingFields = true
-                            HexBox.Text = string.format("#%02X%02X%02X", r, g, b)
-                            RBox.Text = tostring(r)
-                            GBox.Text = tostring(g)
-                            BBox.Text = tostring(b)
-                            updatingFields = false
-                        end
-                    end
-
-                    local function UpdateSVFromInput(inputPos)
-                        local relX = math.clamp((inputPos.X - SVBox.AbsolutePosition.X) / SVBox.AbsoluteSize.X, 0, 1)
-                        local relY = math.clamp((inputPos.Y - SVBox.AbsolutePosition.Y) / SVBox.AbsoluteSize.Y, 0, 1)
-                        editS = relX
-                        editV = 1 - relY
-                        RefreshUI(false)
-                    end
-
-                    local function UpdateHueFromInput(inputPos)
-                        local relY = math.clamp((inputPos.Y - HueSlider.AbsolutePosition.Y) / HueSlider.AbsoluteSize.Y, 0, 1)
-                        editH = relY
-                        RefreshUI(false)
-                    end
-
-                    table.insert(Connections, SVHitbox.InputBegan:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-                            svDragging = true
-                            UpdateSVFromInput(inp.Position)
-                        end
-                    end))
-
-                    table.insert(Connections, HueHitbox.InputBegan:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-                            hueDragging = true
-                            UpdateHueFromInput(inp.Position)
-                        end
-                    end))
-
-                    table.insert(Connections, UserInputService.InputChanged:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch then
-                            if svDragging then UpdateSVFromInput(inp.Position) end
-                            if hueDragging then UpdateHueFromInput(inp.Position) end
-                        end
-                    end))
-
-                    local function StopDragging(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-                            svDragging = false
-                            hueDragging = false
-                        end
-                    end
-                    table.insert(Connections, UserInputService.InputEnded:Connect(StopDragging))
-
-                    HexBox.FocusLost:Connect(function()
-                        if updatingFields then return end
-                        local text = HexBox.Text:gsub("#", ""):gsub("%s", "")
-                        if #text == 6 and text:match("^%x+$") then
-                            local r = tonumber(text:sub(1, 2), 16)
-                            local g = tonumber(text:sub(3, 4), 16)
-                            local b = tonumber(text:sub(5, 6), 16)
-                            editH, editS, editV = Color3.fromRGB(r, g, b):ToHSV()
-                        end
-                        RefreshUI(false)
-                    end)
-
-                    local function ApplyRGBEdit()
-                        if updatingFields then return end
-                        local curR = math.floor(editColor.R * 255 + 0.5)
-                        local curG = math.floor(editColor.G * 255 + 0.5)
-                        local curB = math.floor(editColor.B * 255 + 0.5)
-                        local r = math.clamp(math.floor(tonumber(RBox.Text) or curR), 0, 255)
-                        local g = math.clamp(math.floor(tonumber(GBox.Text) or curG), 0, 255)
-                        local b = math.clamp(math.floor(tonumber(BBox.Text) or curB), 0, 255)
-                        editH, editS, editV = Color3.fromRGB(r, g, b):ToHSV()
-                        RefreshUI(false)
-                    end
-                    RBox.FocusLost:Connect(ApplyRGBEdit)
-                    GBox.FocusLost:Connect(ApplyRGBEdit)
-                    BBox.FocusLost:Connect(ApplyRGBEdit)
+                    local GridLayout = Instance.new("UIGridLayout")
+                    GridLayout.CellSize = UDim2.new(0, 30, 0, 30)
+                    GridLayout.CellPadding = UDim2.new(0, 6, 0, 6)
+                    GridLayout.FillDirection = Enum.FillDirection.Horizontal
+                    GridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                    GridLayout.Parent = Grid
 
                     local function CloseModal()
-                        for _, connection in ipairs(Connections) do
-                            connection:Disconnect()
-                        end
                         Overlay:Destroy()
                     end
 
-                    CancelButton.MouseButton1Click:Connect(CloseModal)
+                    for i, colorOption in ipairs(ColorConfig.Colors) do
+                        local Option = Instance.new("TextButton")
+                        Option.Text = ""
+                        Option.BackgroundColor3 = colorOption
+                        Option.BorderSizePixel = 0
+                        Option.LayoutOrder = i
+                        Option.ZIndex = 62
+                        Option.Parent = Grid
+
+                        local OptionCorner = Instance.new("UICorner")
+                        OptionCorner.CornerRadius = UDim.new(0, 6)
+                        OptionCorner.Parent = Option
+
+                        local OptionStroke = Instance.new("UIStroke")
+                        OptionStroke.Color = Color3.fromRGB(255, 255, 255)
+                        OptionStroke.Transparency = (ColorFunc.Value == colorOption) and 0.2 or 0.85
+                        OptionStroke.Thickness = (ColorFunc.Value == colorOption) and 2 or 1
+                        OptionStroke.Parent = Option
+
+                        Option.MouseButton1Click:Connect(function()
+                            ApplyColor(colorOption, false, true)
+                            CloseModal()
+                        end)
+                    end
+
                     OverlayClose.MouseButton1Click:Connect(CloseModal)
-
-                    ApplyButton.MouseButton1Click:Connect(function()
-                        ApplyColor(editColor, false, true)
-                        CloseModal()
-                    end)
-
-                    RefreshUI(false)
                 end
 
                 Swatch.MouseButton1Click:Connect(OpenPalette)
